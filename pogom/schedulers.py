@@ -580,7 +580,7 @@ class SpeedScan(HexSearch):
                 continue
 
             # if the start time isn't yet, don't bother looking further, since queue sorted by start time
-            if ms < item['start']:  # grace period of 10 sec
+            if ms < item['start']:
                 break
 
             n += 1
