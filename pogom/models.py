@@ -818,6 +818,80 @@ class SpawnSighting(BaseModel):
     scan_time = DateTimeField()
     tth_ms = IntegerField(null=True)
 
+    @classmethod
+    def classify(cls, sighting):
+        # get past sightings
+        query = list(cls.select()
+                        .where(spawnpoint_id == sighting['spawnpoint_id'])
+                        .dicts())
+                    
+        query.append(sighting)
+
+        valid_times = filter(lambda x: x['tth_ms'], query)
+
+        # make a sorted list of the minsec
+        valid_ms = map(lambda x: x['scan_time'].minute * 60 + x['scan_time'].second, tth_list).sort()
+
+        # add minsec clock wrap around point
+        valid_ms.append(ms_list[0] + 3600)
+
+        # make a list of gaps between sightings
+        valid_max_gap = max([ms_list[i+1]-ms_list[i] for i in range(len(ms_list)-1)])
+
+        # categorize the other times based on the known tth time
+        invalid_times = filter(lambda x: not x['tth_ms'], query)
+
+        # make a sorted list of the minsec
+        invalid_ms = map(lambda x: x['scan_time'].minute * 60 + x['scan_time'].second, tth_list).sort()
+
+        # add minsec clock wrap around point
+        invalid_ms.append(invalid_ms[0] + 3600)
+
+        # make a list of gaps between sightings
+        invalid_max_gap = max([ms_list[i+1]-ms_list[i] for i in range(len(ms_list)-1)])
+
+        # if no valid time til hidden in sightings, then check if bands covered
+        if not valid_times:
+
+            # check if largest scan gap is > 14 min to see if we could have missed a time
+            if invalid_max_gap > 14 * 60:
+                return # cannot classify. Will need more data. Set something to establish next time to scan?
+
+            sp_type = 'iiii'
+
+        # if there are two valid tth, then the biggest gap between the clusters will be ~30 min
+        else if valid_max_gap < 45 * 60:
+            sp_type = 'vhvh'
+        
+        # if neither of the above, we have one valid tth
+        else:
+            # classify all the times as i (invalid) or h (hidden) based on the valid tth time
+
+            # re-map times to put them after the tth time
+            invalid_ms = map(lambda x: x if x > tth else x + 3600, invalid_ms)
+
+            for i in range[2, 5]
+
+
+        # filter for valid tth
+            # if v, classify other as vhi
+            # if 5 bands and no v, label 1x60
+        # check connections  ???? ++++, ----
+        # reset first plus to first place or minus to last
+        # Decide next scan time by missing plus/minus
+        '''    ivhh, +??? -> +??- ?
+        ivhh, ???+ -> -???
+        iivh, ++?? -> ++--
+        iivh, -??? -> -+++
+        iivh, ?-?? -> 
+        v, iv, iiv, iiii, vhv
+        v
+        iv +-hh, -+hh
+        iiv ++-h, +-+h, -++h
+        iiii shortest period with change
+        vhv +h-h, -h+h
+        based on hash, set spawn time and finalize type
+        '''
 
 class Versions(flaskDb.Model):
     key = CharField()
