@@ -139,7 +139,7 @@ def get_args():
     parser.add_argument('-speed', '--speed-scan',
                         help='Use speed scanning to identify spawn points, and then scan closest spawns.', nargs='?', const='nofile', default=False)
     parser.add_argument('-kph', '--kph',
-                        help='Set a maximum speed in km/hour for scanner movement', type=int, default=80)
+                        help='Set a maximum speed in km/hour for scanner movement', type=int, default=150)
     parser.add_argument('--dump-spawnpoints', help='dump the spawnpoints from the db to json (only for use with -ss)',
                         action='store_true', default=False)
     parser.add_argument('-pd', '--purge-data',
