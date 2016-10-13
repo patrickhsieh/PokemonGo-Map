@@ -370,9 +370,19 @@ def cur_sec():
     return (60 * time.gmtime().tm_min) + time.gmtime().tm_sec
 
 
-# gets the time past the hour for a given time
-def min_sec(t):
-    return (60 * time.gmtime(t).tm_min) + time.gmtime(t).tm_sec
+# gets the total seconds past the hour for a given date
+def date_secs(d):
+    return d.minute * 60 + d.second
+
+
+# gets the total seconds past the hour for a given date
+def clock_between(start, test, end):
+    return (start <= test <= end and start < end) or (not (end <= test <= start) and start > end)
+
+
+# return amount of seconds between two seconds after the hour
+def clock_len(start, end):
+    return end - start if end > start else end + 3600 - start
 
 
 # Return the s2sphere cellid token from a location
