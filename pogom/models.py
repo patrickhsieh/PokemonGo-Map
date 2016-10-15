@@ -600,23 +600,30 @@ class ScannedLocation(BaseModel):
     # with a 2 minute window during which the scan can be done
 
     # default of -1 is for bands not yet scanned
-    band1 = IntegerField(default=-1, constraints=[Check('band1 >= -1'), Check('band1 < 3600')])
-    band2 = IntegerField(default=-1, constraints=[Check('band2 >= -1'), Check('band2 < 3600')])
-    band3 = IntegerField(default=-1, constraints=[Check('band3 >= -1'), Check('band3 < 3600')])
-    band4 = IntegerField(default=-1, constraints=[Check('band4 >= -1'), Check('band4 < 3600')])
-    band5 = IntegerField(default=-1, constraints=[Check('band5 >= -1'), Check('band5 < 3600')])
+    band1 = IntegerField(default=-1)
+    band2 = IntegerField(default=-1)
+    band3 = IntegerField(default=-1)
+    band4 = IntegerField(default=-1)
+    band5 = IntegerField(default=-1)
 
     # midpoint is the center of the bands relative to band 1
     # e.g., if band 1 is 10.4 min, and band 4 is 34.0 min, midpoint is -0.2 min in minsec
     # extra 10 seconds in case of delay in recording now time
-    midpoint = IntegerField(default=0, constraints=[Check('midpoint >= -130'), Check('midpoint <= 130')])
+    midpoint = IntegerField(default=0)
 
     # width is how wide the valid window is. Default is 0, max is 2 min
     # e.g., if band 1 is 10.4 min, and band 4 is 34.0 min, midpoint is 0.4 min in minsec
-    width = IntegerField(default=0, constraints=[Check('width >= 0'), Check('width <= 120')])
+    width = IntegerField(default=0)
 
     class Meta:
         indexes = ((('latitude', 'longitude'), False),)
+        constraints = [Check('band1 >= -1'), Check('band1 < 3600'),
+                       Check('band2 >= -1'), Check('band2 < 3600'),
+                       Check('band3 >= -1'), Check('band3 < 3600'),
+                       Check('band4 >= -1'), Check('band4 < 3600'),
+                       Check('band5 >= -1'), Check('band5 < 3600'),
+                       Check('midpoint >= -130'), Check('midpoint <= 130'),
+                       Check('width >= 0'), Check('width <= 120')]
 
     @staticmethod
     def get_recent(swLat, swLng, neLat, neLng, timestamp=0, oSwLat=None, oSwLng=None, oNeLat=None, oNeLng=None):
@@ -881,13 +888,14 @@ class SpawnPoint(BaseModel):
     id = CharField(primary_key=True, max_length=50)
     latitude = DoubleField()
     longitude = DoubleField()
-    tth_secs = IntegerField(constraints=[Check('tth_secs >= 0'), Check('tth_secs < 3600')], null=True)
+    tth_secs = IntegerField(null=True)  # seconds after the hour of the time_til_hidden field
     last_scanned = DateTimeField(index=True)
     type_id = CharField(max_length=4, default='vhhh')
     links = CharField(max_length=4, default='????')
 
     class Meta:
         indexes = ((('latitude', 'longitude'), False),)
+        constraints = [Check('tth_secs >= 0'), Check('tth_secs < 3600')]
 
     # Returns the spawn point dict from ID
     @classmethod
