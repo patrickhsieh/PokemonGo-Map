@@ -590,7 +590,7 @@ class ScannedLocation(BaseModel):
     cellid = CharField(primary_key=True, max_length=50)
     latitude = DoubleField()
     longitude = DoubleField()
-    last_modified = DateTimeField(index=True, default=datetime.utcnow)
+    last_modified = DateTimeField(index=True, default=datetime.utcnow, null=True)
 
     # marked true when all five bands have been completed
     done = BooleanField(default=False)
