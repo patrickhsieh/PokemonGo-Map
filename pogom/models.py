@@ -91,15 +91,18 @@ class Pokemon(BaseModel):
 
     @staticmethod
     def get_active(swLat, swLng, neLat, neLng):
+        now_date = datetime.utcnow()
+        now_secs = date_secs(now_date)
         if swLat is None or swLng is None or neLat is None or neLng is None:
             query = (Pokemon
                      .select()
-                     .where(Pokemon.disappear_time > datetime.utcnow())
+                     .where(Pokemon.disappear_time > now_date)
                      .dicts())
         else:
             query = (Pokemon
                      .select()
-                     .where((Pokemon.disappear_time > datetime.utcnow()) &
+                     # add 1 hour buffer to include spawnpoints that persist after tth, like vhvh
+                     .where((Pokemon.disappear_time > now_date - timedelta(hours=1)) &
                             (((Pokemon.latitude >= swLat) &
                               (Pokemon.longitude >= swLng) &
                               (Pokemon.latitude <= neLat) &
@@ -111,7 +114,12 @@ class Pokemon(BaseModel):
 
         pokemons = []
         for p in query:
-            if SpawnPoint.hidden(p['spawnpoint_id']):
+
+            sp = SpawnPoint.get_by_id(sp_id)
+            now_quartile = SpawnPoint.get_quartile(now_secs, sp)
+    
+            # skip pokemon that are currently hidden
+            if str(sp['type_id'])[now_quartile] == 'h':
                 continue
 
             p['pokemon_name'] = get_pokemon_name(p['pokemon_id'])
@@ -623,13 +631,13 @@ class ScannedLocation(BaseModel):
         if scan['done']:
             return scan
 
-        now_ms = date_secs(now_date)
+        now_secs = date_secs(now_date)
         if scan['band1'] == -1:
-            return cls.db_format(scan, 1, now_ms)
+            return cls.db_format(scan, 1, now_secs)
 
         # calc if number falls in band with remaining points
         basems = scan['band1']
-        delta = (now_ms - basems - scan['midpoint'] + 3600) % 3600
+        delta = (now_secs - basems - scan['midpoint'] + 3600) % 3600
         band = int(round(delta / 12 / 60.0) % 5) + 1
 
         # Check if that band already filled
@@ -642,7 +650,7 @@ class ScannedLocation(BaseModel):
             return scan
 
         # find band midpoint/width
-        scan = cls.db_format(scan, band, now_ms)
+        scan = cls.db_format(scan, band, now_secs)
         bts = [scan['band' + str(i)] for i in range(1, 6)]
         bts = filter(lambda ms: ms > -1, bts)
         bts_delta = map(lambda ms: (ms - basems + 3600) % 3600, bts)
@@ -728,9 +736,9 @@ class SpawnPoint(BaseModel):
     id = CharField(primary_key=True, max_length=50)
     latitude = DoubleField()
     longitude = DoubleField()
-    despawn_time = IntegerField(constraints=[Check('despawn_time >= 0'), Check('despawn_time < 3600')], null=True)
-    last_modified = DateTimeField(index=True)
-    sp_type = CharField(max_length=4, default='vhhh')
+    tth_secs = IntegerField(constraints=[Check('tth_secs >= 0'), Check('tth_secs < 3600')], null=True)
+    last_scanned = DateTimeField(index=True)
+    type_id = CharField(max_length=4, default='vhhh')
     links = CharField(max_length=4, default='????')
 
     class Meta:
@@ -759,63 +767,60 @@ class SpawnPoint(BaseModel):
     @classmethod
     def get_times(cls, cell, scan, now_date, scan_delay):
         l = []
-        now_ms = date_secs(now_date)
+        now_secs = date_secs(now_date)
         for sp in ScannedLocation.linked_spawn_points(cell):
 
-            iiii = sp['sp_type'] == 'iiii'
-            v_q_end = sp['despawn_time']  # seconds past the hour for the end of the base tth quartile
+            type_id = str(sp['type_id']) if sp['type_id'] else 'vhhh'
+            links = str(sp['links']) if sp['links'] else '????'
 
-            # triple length to avoid going beyond the end or beginning
-            links = sp['links'] + sp['links'] + sp['links']
-            quartile = cls.get_quartile(now_ms, sp)
+            now_quartile = cls.get_quartile(now_secs, sp)
+
+            if type_id != 'vhhh':
+                pass
 
             # See if we need to check the spawn in the current quartile or the next quartile
-            for q in range(quartile, next_quartile + 2):
+            for q in range(now_quartile, now_quartile + 2):
 
-                # don't check during hidden quartiles
-                if sp['sp_type'][q] == 'h':
-                    continue
-                
-                # if the next quartile is linked or hidden, we don't need to check
-                if q > quartile and links[q + 4] == '+':
-                    continue
+                if type_id == 'iiii':  # 1x60 spawn
+                    end = sp['tth_secs']
+                    # int(sp['links']) is the current best estimate for start time for iiii spawns
+                    start = int(sp['links'])
 
-                # if hour long spawn and we already have the spawn/despawn time 58 min apart,
-                # don't bother trying to further pinpoint the spawn time
-                if iiii and q > quartile and (v_q_end + 3600 - sp['despawn_time']) % 3600 > 58 * 60:
-                    continue
+                    # in addition to looking for the spawn during the known spawn times for 1X60 spawns,
+                    # also try to narrow down the window when we don't know the precise time
+                    if q > now_quartile:
 
-                if iiii:
-                    end = int(sp['links']) if q > quartile else v_q_end
-                else:
-                    end = (v_q_end + q * 15 * 60) % 3600
+                        # if hour long spawn and we already have the spawn/despawn time 58 min apart,
+                        # don't bother trying to further pinpoint the spawn time
+                        if (end - start + 3600) % 3600 > 58 * 60:
+                            continue
+                        
+                        start, end = end, start
 
-                # adjust the end time to be after now_ms
-                if end < now_ms:
-                    end += 3600
-
-                # if linked and not hidden, push the end time out
-                for i in range(q, q + 3):
-                    if links[i + 4] != '+' or sp['sp_type'][q] == 'h':
-                        break
-
-                    end += 15 * 60
+                else:  # not a 1x60 spawn
+                    # don't check during hidden quartiles
+                    if type_id[q % 4] == 'h':
+                        continue
                     
-                if iiii:
-                    start = int(sp['links']) if q == quartile else v_q_end
-                
-                else:
-                    start = end - 15 * 60 + scan_delay
-                    
-                    # see if links give a earlier start time
-                    for i in range(q - 1, q - 4, -1):
-                        if links[i + 4] != '+':
-                            break
+                    # if the next quartile is linked, we don't need to check it again
+                    if q > now_quartile and links[(q + 3) % 4] == '+':
+                        continue
 
-                        start -= 15 * 60
+                    # get end time of this quartile, adjust time according to links in the spawn_type,
+                    # and round the clock (% 3600) if necessary
+                    end = (sp['tth_secs'] + q * 15 * 60) % 3600
+
+                    # shift 15 min earlier for spawn time and adjust time according to links in the spawn_type
+                    start = end - 15 * 60 + scan_delay + cls.adjust_time(q, links, -1)
+
+                    end +=  cls.adjust_time(q, links)
+
+                # adjust the end time to be after now_secs
+                if end < now_secs:
+                    start, end = start + 3600, end + 3600
 
                 # skip it if the spawnpoint has already been scanned since spawned
-                if (now_date - cls.get_by_id(sp['id'])['last_modified']).total_seconds() <= now_ms - start:
+                if (now_date - cls.get_by_id(sp['id'])['last_scanned']).total_seconds() <= now_secs - start:
                     continue
 
                 l.append(ScannedLocation._q_init(scan, start, end, 'spawn', sp['id']))
@@ -824,34 +829,31 @@ class SpawnPoint(BaseModel):
 
     @staticmethod
     def get_quartile(secs, sp):
-        return int(((secs - sp['despawn_time'] + 15 * 60 + 3600) % 3600) / 15 / 60)
+        return int(((secs - sp['tth_secs'] + 15 * 60 + 3600 - 1) % 3600) / 15 / 60)
 
     @staticmethod
-    def sec_to_despawn(ms, sp):
-        quartile = SpawnPoint.get_quartile(ms, sp)
-        links = sp['links'] + sp['links']
+    def adjust_time(q, links, inc=1):
+        # see if links give a earlier start time
+        hidden_adjust = 0
+        adjust = 0
+        # check from q - 1 to q - 4, but add 4 to shift to q + 3 to q to avoid going below
+        # the length of links
+        q_range = range(q, q + 3) if inc == 1 else range(q + 3, q, inc) 
 
-        # adjust the end time to be after now_ms
-        end = (sp['despawn_time'] + quartile * 15 * 60) % 3600
-        if end < ms:
-            end += 3600
-
-        # if linked, push the end time out
-        for i in range(quartile, quartile + 3):
-            if links[i + 4] != '+':
+        for i in q_range:
+            if links[i % 4] == 'h':
+                if inc == 1:
+                    adjust += 15 * 60
+                else:
+                    # look past hiddens when going backwards, to see if next is +
+                    hidden_adjust += 15 * 60
+            elif links[i % 4] == '+':
+                adjust += (15 * 60 + hidden_adjust) * inc
+            else:  # could be - or ?
                 break
+        
+        return adjust
 
-            end += 15 * 60
-
-        return end - ms
-
-    @staticmethod
-    def hidden(sp_id):
-        sp = SpawnPoint.get_by_id(sp_id)
-        now_date = datetime.utcnow()
-        quartile = SpawnPoint.get_quartile(date_secs(now_date), sp)
-
-        return True if sp['sp_type'][quartile] == 'h' else False
 
 
     @classmethod
@@ -897,18 +899,18 @@ class ScanSpawnPoint(BaseModel):
         primary_key = CompositeKey('scannedlocation', 'spawnpoint')
 
 
-class SpawnSighting(BaseModel):
+class SpawnpointDetectionData(BaseModel):
     id = CharField(primary_key=True, max_length=54)
-    encounter_id = CharField(max_length=50)
-    spawnpoint = ForeignKeyField(SpawnPoint)
+    encounter_id = ForeignKeyField(Pokemon)
+    spawnpoint_id = ForeignKeyField(SpawnPoint)
     scan_time = DateTimeField()
-    tth_ms = IntegerField(null=True)
+    tth_secs = IntegerField(null=True)
 
     @classmethod
     def classify(cls, sp, sighting=None):
 
         # return if already fully identified
-        if sp['links'] and not sp['links'].count('?'):
+        if sp['links'] and not str(sp['links']).count('?'):
             return
 
         # get past sightings
@@ -920,10 +922,10 @@ class SpawnSighting(BaseModel):
         if sighting:
             query.append(sighting)
         
-        tth = sp['despawn_time']
+        tth = sp['tth_secs']
 
-        valid_times = filter(lambda x: x['tth_ms'], query)
-        invalid_times = filter(lambda x: not x['tth_ms'], query)
+        valid_times = filter(lambda x: x['tth_secs'], query)
+        invalid_times = filter(lambda x: not x['tth_secs'], query)
 
         # make a sorted list of the seconds after the hour
         valid_secs = sorted(map(lambda x: date_secs(x['scan_time']), valid_times))
@@ -950,7 +952,7 @@ class SpawnSighting(BaseModel):
         # if no valid time til hidden in sightings, it's an hour-long spawnpoint
         if not valid_times:
 
-            sp_type = 'iiii'
+            type_id = 'iiii'
 
             start_end_list = []
             for s in sight_list:
@@ -975,18 +977,21 @@ class SpawnSighting(BaseModel):
 
             # Take the union of all the ranges
             while True:
-                union = []  # list of unions of ranges with the same encounter id
+                # union is list of unions of ranges with the same encounter id
+                union = []
                 for start, end in start_end_list:
-
-                    if union and clock_between(union[-1][0], start, union[-1][1]):
-                        union[-1][1] = end if not(clock_between(union[-1][0], end, union[-1][1])) else union[-1][1]
-                    elif union and clock_between(union[-1][0], end, union[-1][1]):
-                        union[-1][0] = start if not(clock_between(union[-1][0], start, union[-1][1])) else union[-1][0] 
-                    else:
+                    if not union:
                         union.append([start, end])
+                        continue
+                    # cycle through all ranges in union, since it might overlap with any of them
+                    for u in union:
+                        if clock_between(u[0], start, u[1]):
+                            u[1] = end if not(clock_between(u[0], end, u[1])) else u[1]
+                        elif clock_between(u[0], end, u[1]):
+                            u[0] = start if not(clock_between(u[0], start, u[1])) else u[0] 
+                        else:
+                            union.append([start, end])
                     
-                    log.warning(union)
-
                 # Are no more unions possible?
                 if union == start_end_list:
                     break
@@ -998,19 +1003,20 @@ class SpawnSighting(BaseModel):
                            union, [0, 3600])
             sp['disappear_time'] = union[0][1]
             sp['links'] = str(union[0][0])
+            log.info('iiii: appear %d, despawn %d', union[0][0], union[0][1])
             return
 
 
         # if there are two valid tth, then the biggest gap between the clusters will be ~30 min
         elif valid_max_gap < 37 * 60:
 
-            sp_type = 'vhvh'
+            type_id = 'vhvh'
         
         # if neither of the above, we have one valid tth
         else:
             # classify all the times as i (invalid) or h (hidden) based on the valid tth time
 
-            sp_type = 'v'
+            type_id = 'v'
 
             # subtract the tth (time til hidden) ms and add 15 min to base at zero for quartiles
             invalid_secs = map(lambda x: (x - tth + 15 * 60 + 3600) % 3600, invalid_secs)
@@ -1019,16 +1025,16 @@ class SpawnSighting(BaseModel):
 
                 invalids = [ms for ms in invalid_secs if i * 15 * 60 <= ms < (i + 1) * 15 *60]
                 
-                sp_type += 'i' if invalids else 'h'
+                type_id += 'i' if invalids else 'h'
 
         # find the links between the quartiles in the spawn type, to distinguish vhhi from ivhh
         # same pokemon between two times is '+', different pokemon is a '-'
         # For the hidden times, an 'h' is used. Until determined, '?' is used.
-        # Note index is shifted by a half. links[0] is the link between sp_type[0] and sp_type[1],
-        # and so on. links[3] is the link between sp_type[3] and sp_type[0]
+        # Note index is shifted by a half. links[0] is the link between type_id[0] and type_id[1],
+        # and so on. links[3] is the link between type_id[3] and type_id[0]
 
-        if sp_type == 'vhhh':
-            sp['type'] = sp_type
+        if type_id == 'vhhh':
+            sp['type_id'] = type_id
             sp['links'] = '-hhh'
             return
             
@@ -1037,16 +1043,20 @@ class SpawnSighting(BaseModel):
         # + links overwrite - links, e.g. adding ?++? to --?? gives -++?
         # So do the - sightings first 
 
-        sight_list = (filter(lambda x: not x['same'], sight_list) +
-                      sorted(filter(lambda x: x['same'], sight_list), reverse=True))
+        sight_list = (sorted(filter(lambda x: not x['same'], sight_list), key=itemgetter('delta')) +
+                      sorted(filter(lambda x: x['same'], sight_list), key=itemgetter('delta'), reverse=True))
         
         for s in sight_list:
 
-            # get the seconds past the hour for start and end times
-            start = (date_secs(s['date']) - tth + 15 * 60 + 3600) % 3600
+            # get the seconds past the tth time instead of past the hour for start and end times
+
+            # minus 1 second to stop scans exactly on the border between quartiles from rounding into 
+            # the next quartile, i.e. tth = 100, s['date'] = 100 would fall in the quartile 1 instead of 0
+            # because it's exactly on the border, and int() rounds to 1
+            start = (date_secs(s['date']) - tth + 15 * 60 + 3600 - 1) % 3600
             end = start + int(s['delta'].total_seconds())
 
-            # Convert to quartiles, based on the valid tth as index 0
+            # Convert to quartiles, with the valid TTH quartile as the 0th quartile
             start_quartile = int(start / 15 / 60)
             end_quartile = int(end / 15 / 60) % 4
 
@@ -1057,7 +1067,7 @@ class SpawnSighting(BaseModel):
             # update each of the four quartiles in links
             for i in range(0, 4):
 
-                if sp_type[i] == 'h':
+                if type_id[i] == 'h':
                     links = links[:i] + 'h' + links[i + 1:]
                     continue
                 
@@ -1077,10 +1087,11 @@ class SpawnSighting(BaseModel):
             if not links.count('?') and links.count('-') == 1:
                 break
 
-        sp['type'] = sp_type
+        sp['type_id'] = type_id
         sp['links'] = links
+        log.info('%s, %s', type_id, links)
 
-        if sp_type != 'vhhi' and sp_type != 'vhvh':
+        if type_id != 'vhhi' and type_id != 'vhvh' and type_id != 'vhii':
             pass
 
         return
@@ -1188,14 +1199,14 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue):
                 }
 
                 now_stamp = datetime.utcfromtimestamp(p['last_modified_timestamp_ms'] / 1000.0)
-                tth_ms = date_secs(d_t) if d_t_stamp else None
+                tth_secs = date_secs(d_t) if d_t_stamp else None
 
                 sightings[p['encounter_id']] = {
-                    'id': b64encode(str(p['encounter_id'])) + '_' + str(now_ms),
+                    'id': b64encode(str(p['encounter_id'])) + '_' + str(now_secs),
                     'encounter_id': b64encode(str(p['encounter_id'])),
                     'spawnpoint': p['spawn_point_id'],
                     'scan_time': now_stamp,
-                    'tth_ms': tth_ms
+                    'tth_secs': tth_secs
                 }
 
                 if args.webhooks:
@@ -1214,8 +1225,8 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue):
                     'id': p['spawn_point_id'],
                     'latitude': p['latitude'],
                     'longitude': p['longitude'],
-                    'last_modified': now_stamp,
-                    'despawn_time': sp['despawn_time'] if sp else tth_ms
+                    'last_scanned': now_stamp,
+                    'tth_secs': sp['tth_secs'] if sp else tth_secs
                 }
 
                 if not sp:
@@ -1321,12 +1332,26 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue):
 
         if len(spawn_points):
             if scan_location['done']:
+                now_date = datetime.utcnow()
+                now_secs = date_secs(now_date)
                 for e in pokemons.keys():
-                    SpawnSighting.classify(spawn_points[e], sightings[e])
+                    sp = spawn_points[e]
+                    SpawnpointDetectionData.classify(sp, sightings[e])
+
+                    # adjust disappear time for 1x60 spawn points
+                    if sp['type_id'] == 'iiii':
+                        secs_until_disappear = (sp['disappear_time'] - now_secs + 3600) % 3600
+                        pokemon[e]['disappear_time'] = now_date + timedelta(seconds=secs_until_disappear)
+                        continue
+
+                    # adjust the disappear time for pokemon that go through hidden quartiles
+                    quartile = SpawnPoint.get_quartile(now_secs, sp)
+
+                    pokemon[e]['disappear_time'] += SpawnPoint.adjust_time(quartile, sp['links'])
 
             db_update_queue.put((SpawnPoint, spawn_points))
             db_update_queue.put((ScanSpawnPoint, scan_spawn_points))
-            db_update_queue.put((SpawnSighting, sightings))
+            db_update_queue.put((SpawnpointDetectionData, sightings))
 
         if len(pokemons):
             db_update_queue.put((Pokemon, pokemons))
@@ -1557,14 +1582,14 @@ def create_tables(db):
     db.connect()
     verify_database_schema(db)
     db.create_tables([Pokemon, Pokestop, Gym, ScannedLocation, GymDetails, GymMember, GymPokemon,
-                      Trainer, MainWorker, WorkerStatus, SpawnPoint, ScanSpawnPoint, SpawnSighting], safe=True)
+                      Trainer, MainWorker, WorkerStatus, SpawnPoint, ScanSpawnPoint, SpawnpointDetectionData], safe=True)
     db.close()
 
 
 def drop_tables(db):
     db.connect()
     db.drop_tables([Pokemon, Pokestop, Gym, ScannedLocation, Versions, GymDetails, GymMember, GymPokemon,
-                    Trainer, MainWorker, WorkerStatus, SpawnPoint, ScanSpawnPoint, SpawnSighting, Versions], safe=True)
+                    Trainer, MainWorker, WorkerStatus, SpawnPoint, ScanSpawnPoint, SpawnpointDetectionData, Versions], safe=True)
     db.close()
 
 
@@ -1653,6 +1678,6 @@ def database_migrate(db, old_ver):
 
     if old_ver < 9:
         migrate(
-            migrator.add_column('spawnpoint', 'sp_type', TextField(null=True, default='vhhh')),
+            migrator.add_column('spawnpoint', 'type_id', TextField(null=True, default='vhhh')),
             migrator.add_column('spawnpoint', 'links', TextField(null=True, default='????'))
         )
