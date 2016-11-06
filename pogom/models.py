@@ -98,18 +98,17 @@ class Pokemon(BaseModel):
 
     @staticmethod
     def get_active(swLat, swLng, neLat, neLng, timestamp=0, oSwLat=None, oSwLng=None, oNeLat=None, oNeLng=None):
-        an_hour_ago = datetime.utcnow() - timedelta(hours=1)
-        now_secs = date_secs(datetime.utcnow())
+        date_now = datetime.utcnow()
         query = Pokemon.select()
         if not (swLat and swLng and neLat and neLng):
             query = (query
-                     .where(Pokemon.disappear_time > an_hour_ago)
+                     .where(Pokemon.disappear_time > date_now)
                      .dicts())
         elif timestamp > 0:
             # If timestamp is known only load modified pokemon
             query = (query
                      .where(((Pokemon.last_modified > datetime.utcfromtimestamp(timestamp / 1000)) &
-                             (Pokemon.disappear_time > an_hour_ago)) &
+                             (Pokemon.disappear_time > date_now)) &
                             ((Pokemon.latitude >= swLat) &
                              (Pokemon.longitude >= swLng) &
                              (Pokemon.latitude <= neLat) &
@@ -118,12 +117,12 @@ class Pokemon(BaseModel):
         elif oSwLat and oSwLng and oNeLat and oNeLng:
             # Send Pokemon in view but exclude those within old boundaries. Only send newly uncovered Pokemon.
             query = (query
-                     .where(((Pokemon.disappear_time > an_hour_ago) &
+                     .where(((Pokemon.disappear_time > date_now) &
                             (((Pokemon.latitude >= swLat) &
                               (Pokemon.longitude >= swLng) &
                               (Pokemon.latitude <= neLat) &
                               (Pokemon.longitude <= neLng))) &
-                            ~((Pokemon.disappear_time > an_hour_ago) &
+                            ~((Pokemon.disappear_time > date_now) &
                               (Pokemon.latitude >= oSwLat) &
                               (Pokemon.longitude >= oSwLng) &
                               (Pokemon.latitude <= oNeLat) &
@@ -133,7 +132,7 @@ class Pokemon(BaseModel):
             query = (Pokemon
                      .select()
                      # add 1 hour buffer to include spawnpoints that persist after tth, like vhvh
-                     .where((Pokemon.disappear_time > an_hour_ago) &
+                     .where((Pokemon.disappear_time > date_now) &
                             (((Pokemon.latitude >= swLat) &
                               (Pokemon.longitude >= swLng) &
                               (Pokemon.latitude <= neLat) &
@@ -145,14 +144,6 @@ class Pokemon(BaseModel):
 
         pokemons = []
         for p in query:
-
-            sp = SpawnPoint.get_by_id(p['spawnpoint_id'])
-            now_quartile = SpawnPoint.get_quartile(now_secs, sp)
-
-            # skip pokemon that are currently hidden
-            if str(sp['type_id'])[now_quartile] == 'h':
-                continue
-
             p['pokemon_name'] = get_pokemon_name(p['pokemon_id'])
             p['pokemon_rarity'] = get_pokemon_rarity(p['pokemon_id'])
             p['pokemon_types'] = get_pokemon_types(p['pokemon_id'])
@@ -890,8 +881,7 @@ class SpawnPoint(BaseModel):
     longitude = DoubleField()
     tth_secs = IntegerField(null=True)  # seconds after the hour of the time_til_hidden field
     last_scanned = DateTimeField(index=True)
-    type_id = CharField(max_length=4, default='vhhh')
-    links = CharField(max_length=4, default='????')
+    type_id = CharField(max_length=4, default='1x30')
 
     class Meta:
         indexes = ((('latitude', 'longitude'), False),)
@@ -1404,7 +1394,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                     (p['last_modified_timestamp_ms'] +
                      p['time_till_hidden_ms']) / 1000.0)
             else:
-                # Set a value of 15 minutes because currently its unknown but larger than 15.
+                # Set a value of 15 minutes because currently its unknown.
                 d_t = datetime.utcfromtimestamp((p['last_modified_timestamp_ms'] + 900000) / 1000.0)
 
             printPokemon(p['pokemon_data']['pokemon_id'], p['latitude'],
