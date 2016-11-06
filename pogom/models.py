@@ -982,7 +982,7 @@ class SpawnPoint(BaseModel):
 
     @staticmethod
     def get_quartile(secs, sp):
-        return int(((secs - sp['tth_secs'] + 15 * 60 + 3600 - 1) % 3600) / 15 / 60)
+        return int(((secs - int(0 if sp['tth_secs'] is None else sp['tth_secs']) + 15 * 60 + 3600 - 1) % 3600) / 15 / 60)
 
     @staticmethod
     def adjust_time(q, links, inc=1):
