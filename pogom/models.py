@@ -1433,7 +1433,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
             sightings[p['encounter_id']] = {
                 'id': b64encode(str(p['encounter_id'])) + '_' + str(date_secs(datetime.utcnow())),
                 'encounter_id': b64encode(str(p['encounter_id'])),
-                'spawnpoint': p['spawn_point_id'],
+                'spawnpoint_id': p['spawn_point_id'],
                 'scan_time': now_stamp,
                 'tth_secs': tth_secs
             }
