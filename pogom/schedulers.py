@@ -604,15 +604,15 @@ class SpeedScan(HexSearch):
 
         if best['score'] == 0:
 
-            log.debug('%s No spawn sites to check currently', prefix)
+            log.info('%s No spawn sites to check currently', prefix)
             return -1, 0, 0, 0
 
         if vincenty(loc, worker_loc).km > (now_date - last_action).total_seconds() * self.args.kph / 3600:
 
-            log.debug('%s Moving %d meters to step %d', prefix, vincenty(loc, worker_loc).m, step)
+            log.info('%s Moving %d meters to step %d', prefix, vincenty(loc, worker_loc).m, step)
             return -1, 0, 0, 0
 
-        log.debug('Search step %d beginning (queue size is %d)', step, len(q))
+        log.info('Search step %d beginning (queue size is %d)', step, len(q))
 
         prefix += ' Step %d,' % (step)
         # Check again if another worker heading there
@@ -624,7 +624,7 @@ class SpeedScan(HexSearch):
             log.info('%s aborting. Overseer refreshing queue.', prefix)
             return -1, 0, 0, 0
 
-        log.debug('%s for a new %s', prefix, best['kind'])
+        log.info('%s for a new %s', prefix, best['kind'])
 
         # Mark scanned
         item['done'] = 'Scanned'
@@ -645,9 +645,10 @@ class SpeedScan(HexSearch):
                 log.warning('Too late by %d sec', -safety_buffer)
 
             # If we had a 0/0/0 scan, then unmark as done so we can retry, and save for Statistics
-            if parsed['bad_scan']:
+            elif parsed['bad_scan']:
                 self.scans_missed_list.append(cellid(item['loc']))
-                log.info('Scan returned 0/0/0 spawns/pokestops/gyms. Leaving in queue.')
+                item['done'] = None
+                log.info('Leaving in queue.')
             else:
                 # Scan returned data
                 self.scans_done += 1
