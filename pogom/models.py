@@ -1155,7 +1155,7 @@ class SpawnpointDetectionData(BaseModel):
                            union, [0, 3600])
             sp['earliest_seen'] = union[0]
             sp['latest_seen'] = union[1]
-            log.info('1x60: appear %d, despawn %d, duration %d', union[0], union[1], (union[1] - union[0]) % 3600) 
+            log.info('1x60: appear %d, despawn %d, duration %d', union[0], union[1], (union[1] - union[0]) % 3600)
 
     # expand the seen times for 30 minute spawnpoints based on scans when spawn wasn't there
     # return true if spawnpoint dict changed
@@ -1181,7 +1181,7 @@ class SpawnpointDetectionData(BaseModel):
         if (sp['latest_seen'] - sp['earliest_seen']) % 3600 > 30 * 60:
             log.warning('Maximum duration for a 30 min spawn exceeded')
 
-        return 
+        return new_sp
 
     # expand a 30 minute spawn with a new seen point based on which endpoint it is closer to
     # return true if sp changed
@@ -1545,7 +1545,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
         if not sp['id'] in sp_id_list:
             if (len(nearby_pokemons) or len(wild_pokemon)) and SpawnpointDetectionData.unseen(sp, now_secs):
                 spawn_points[sp['id']] = sp
-            elif sp['earliest_seen'] != None and clock_between(sp['earliest_seen'], now_secs, sp['latest_seen']):
+            elif sp['earliest_seen'] is not None and clock_between(sp['earliest_seen'], now_secs, sp['latest_seen']):
                 sp['missed_count'] += 1
 
     db_update_queue.put((ScannedLocation, {0: scan_location}))
