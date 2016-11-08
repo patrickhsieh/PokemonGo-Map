@@ -587,10 +587,11 @@ class SpeedScan(HexSearch):
             loc = item['loc']
 
             # Bands are top priority to find new spawns first. Bands closest to origin worth more
-            score = 1000 / (vincenty(loc, self.scan_location).km + 1) if item['kind'] == 'band' else 0
+            # score = 1000 / (vincenty(loc, self.scan_location).km + 1) if item['kind'] == 'band' else 1
+            score = 1000 if item['kind'] == 'band' else 1
 
             # For spawns, score is purely based on how close they are
-            score = (score + (item['kind'] == 'spawn')) / (vincenty(loc, worker_loc).km + .01)
+            score = score / (vincenty(loc, worker_loc).km + .01)
 
             if score > best['score']:
                 best = {'score': score, 'i': i}
@@ -604,7 +605,7 @@ class SpeedScan(HexSearch):
 
         if best['score'] == 0:
 
-            log.info('%s No spawn sites to check currently', prefix)
+            log.info('%s No locations need scanning', prefix)
             return -1, 0, 0, 0
 
         if vincenty(loc, worker_loc).km > (now_date - last_action).total_seconds() * self.args.kph / 3600:
@@ -656,10 +657,9 @@ class SpeedScan(HexSearch):
 
                 # Were we looking for spawn?
                 if status['looking_for'] != 'band':
-                    spawn_points_id_list = map(lambda sp: sp['id'], parsed['spawn_points'].values())
 
                     # Did we find the spawn?
-                    if status['looking_for'] in spawn_points_id_list:
+                    if status['looking_for'] in parsed['sp_id_list']:
                         self.spawns_found += 1
                     else:
 
@@ -670,9 +670,9 @@ class SpeedScan(HexSearch):
                         item['done'] = 'Scanned'
 
                 # For existing spawn points, if in any other queue items, mark 'scanned'
-                for p in parsed['spawn_points'].values():
+                for sp_id in parsed['sp_id_list']:
                     for item in self.queues[0]:
-                        if p['id'] == item.get('sp', None) and item.get('done', None) is None:
+                        if sp_id == item.get('sp', None) and item.get('done', None) is None:
                             item['done'] = 'Scanned'
 
 
