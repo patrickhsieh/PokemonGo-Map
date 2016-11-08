@@ -743,7 +743,7 @@ class ScannedLocation(BaseModel):
 
         nowms = date_secs(now_date)
         if s['band1'] == -1:
-            return [cls._q_init(scan, nowms, nowms + 3600, 'band')]
+            return [cls._q_init(scan, nowms, nowms + 3599, 'band')]
 
         # Find next window
         basems = s['band1']

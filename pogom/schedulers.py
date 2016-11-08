@@ -400,6 +400,7 @@ class SpeedScan(HexSearch):
     def __init__(self, queues, status, args):
         super(SpeedScan, self).__init__(queues, status, args)
         self.refresh_date = datetime.utcnow() - timedelta(days=1)
+        self.next_band_date = self.refresh_date
         self.queues = [[]]
         self.ready = False
         self.spawns_found = 0
@@ -413,8 +414,6 @@ class SpeedScan(HexSearch):
         self.scan_percent = []
         self.spawn_percent = []
         self._stat_init()
-        if self.args.scan_delay != 6:
-            log.warning('Scan delay set to %.1f. Recommended setting for Speed Scan is 6.', self.args.scan_delay)
 
     def _stat_init(self):
         self.spawns_found = 0
@@ -437,6 +436,7 @@ class SpeedScan(HexSearch):
         self.scans = scans
         db_update_queue.put((ScannedLocation, initial))
         log.info('%d steps created', len(scans))
+        self.band_spacing = int(10 * 60 / len(scans))
         self.band_status()
         spawnpoints = SpawnPoint.select_in_hex(self.scan_location, self.args.step_limit)
         if not spawnpoints:
@@ -579,6 +579,10 @@ class SpeedScan(HexSearch):
                 item['done'] = 'Missed' if not item.get('done', False) else item['done']
                 continue
 
+            # if we just did a fresh band recently, wait a few seconds to space out the band scans
+            if now_date < self.next_band_date:
+                continue
+
             # if the start time isn't yet, don't bother looking further, since queue sorted by start time
             if ms < item['start']:
                 break
@@ -586,11 +590,10 @@ class SpeedScan(HexSearch):
             n += 1
             loc = item['loc']
 
-            # Bands are top priority to find new spawns first. Bands closest to origin worth more
-            # score = 1000 / (vincenty(loc, self.scan_location).km + 1) if item['kind'] == 'band' else 1
+            # Bands are top priority to find new spawns first
             score = 1000 if item['kind'] == 'band' else 1
 
-            # For spawns, score is purely based on how close they are
+            # For spawns, score is purely based on how close they are to last worker position
             score = score / (vincenty(loc, worker_loc).km + .01)
 
             if score > best['score']:
@@ -627,10 +630,13 @@ class SpeedScan(HexSearch):
 
         log.info('%s for a new %s', prefix, best['kind'])
 
+        # if a new band, set the date to wait until for the next band
+        if best['kind'] == 'band' and best['end'] - best['start'] > 5 * 60:
+            self.next_band_date = datetime.utcnow() + timedelta(seconds=self.band_spacing)
+
         # Mark scanned
         item['done'] = 'Scanned'
         status['index_of_queue_item'] = i
-        status['looking_for'] = item['sp'] if item['kind'] == 'spawn' else 'other'
 
         return best['step'], best['loc'], 0, 0
 
@@ -655,17 +661,17 @@ class SpeedScan(HexSearch):
                 self.scans_done += 1
                 item['done'] = start_delay
 
-                sp_id = status['looking_for']
                 # Were we looking for spawn?
-                if sp_id != 'other':
+                if item['kind'] == 'spawn':
 
+                    sp_id = item['sp']
                     # Did we find the spawn?
                     if sp_id in parsed['sp_id_list']:
                         self.spawns_found += 1
                     else:
 
                         # if not, record ID and put back in queue
-                        self.spawns_missed_delay[sp_id] = self.spawns_missed_delay.get('looking_for', [])
+                        self.spawns_missed_delay[sp_id] = self.spawns_missed_delay.get(sp_id, [])
                         self.spawns_missed_delay[sp_id].append(start_delay)
                         log.warning('Spawn %s not there %d seconds since due. Ignoring.', sp_id, start_delay)
                         item['done'] = 'Scanned'
