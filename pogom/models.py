@@ -23,7 +23,7 @@ from cachetools import cached
 
 from . import config
 from .utils import get_pokemon_name, get_pokemon_rarity, get_pokemon_types, get_args, \
-    cellid, in_radius, date_secs, clock_between
+    cellid, in_radius, date_secs, clock_between, secs_between
 from .transform import transform_from_wgs_to_gcj, get_new_coords
 from .customLog import printPokemon
 

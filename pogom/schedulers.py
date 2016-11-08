@@ -616,7 +616,7 @@ class SpeedScan(HexSearch):
             log.debug('%s Moving %d meters to step %d', prefix, vincenty(loc, worker_loc).m, step)
             return -1, 0, 0, 0
 
-        log.info('Search step %d beginning (queue size is %d)', step, len(q))
+        log.debug('Search step %d beginning (queue size is %d)', step, len(q))
 
         prefix += ' Step %d,' % (step)
         # Check again if another worker heading there
