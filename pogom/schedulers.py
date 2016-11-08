@@ -408,7 +408,7 @@ class SpeedScan(HexSearch):
         self.scans_missed = 0
         self.scans_missed_list = []
         self.spawn_delay = 10  # number of seconds to delay after spawn time before scanning
-        self.minutes = 9  # Minutes between scan updates. Should be less than 10 to allow for new bands
+        self.minutes = 5  # Minutes between scan updates. Should be less than 10 to allow for new bands
         self.found_percent = []
         self.scan_percent = []
         self.spawn_percent = []
@@ -458,7 +458,7 @@ class SpeedScan(HexSearch):
     def get_overseer_message(self):
         return 'Processing search queue, {:d} areas waiting'.format(len(self.queues[0]))
 
-    # Refresh queue every 9 minutes, since a new band might be available 10 minutes after
+    # Refresh queue every 5 minutes
     # the first band of a scan is done
     def time_to_refresh_queue(self):
         return (datetime.utcnow() - self.refresh_date).total_seconds() > self.minutes * 60
@@ -605,12 +605,12 @@ class SpeedScan(HexSearch):
 
         if best['score'] == 0:
 
-            log.info('%s No locations need scanning', prefix)
+            log.debug('%s No locations need scanning', prefix)
             return -1, 0, 0, 0
 
         if vincenty(loc, worker_loc).km > (now_date - last_action).total_seconds() * self.args.kph / 3600:
 
-            log.info('%s Moving %d meters to step %d', prefix, vincenty(loc, worker_loc).m, step)
+            log.debug('%s Moving %d meters to step %d', prefix, vincenty(loc, worker_loc).m, step)
             return -1, 0, 0, 0
 
         log.info('Search step %d beginning (queue size is %d)', step, len(q))
@@ -630,7 +630,7 @@ class SpeedScan(HexSearch):
         # Mark scanned
         item['done'] = 'Scanned'
         status['index_of_queue_item'] = i
-        status['looking_for'] = item['sp'] if item['kind'] == 'spawn' else 'band'
+        status['looking_for'] = item['sp'] if item['kind'] == 'spawn' else 'other'
 
         return best['step'], best['loc'], 0, 0
 
@@ -649,24 +649,25 @@ class SpeedScan(HexSearch):
             elif parsed['bad_scan']:
                 self.scans_missed_list.append(cellid(item['loc']))
                 item['done'] = None
-                log.info('Leaving in queue.')
+                log.info('Putting back step %d in queue', item['step'])
             else:
                 # Scan returned data
                 self.scans_done += 1
                 item['done'] = start_delay
 
+                sp_id = status['looking_for']
                 # Were we looking for spawn?
-                if status['looking_for'] != 'band':
+                if sp_id != 'other':
 
                     # Did we find the spawn?
-                    if status['looking_for'] in parsed['sp_id_list']:
+                    if sp_id in parsed['sp_id_list']:
                         self.spawns_found += 1
                     else:
 
                         # if not, record ID and put back in queue
-                        self.spawns_missed_delay[status['looking_for']] = self.spawns_missed_delay.get('looking_for', [])
-                        self.spawns_missed_delay[status['looking_for']].append(start_delay)
-                        log.warning('Spawn %s not there % seconds since due. Ignoring.', status['looking_for'], start_delay)
+                        self.spawns_missed_delay[sp_id] = self.spawns_missed_delay.get('looking_for', [])
+                        self.spawns_missed_delay[sp_id].append(start_delay)
+                        log.warning('Spawn %s not there %d seconds since due. Ignoring.', sp_id, start_delay)
                         item['done'] = 'Scanned'
 
                 # For existing spawn points, if in any other queue items, mark 'scanned'

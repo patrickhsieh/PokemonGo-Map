@@ -392,14 +392,14 @@ def date_secs(d):
     return d.minute * 60 + d.second
 
 
-# gets the total seconds past the hour for a given date
+# checks to see if test is between start and end assuming roll over like a clock
 def clock_between(start, test, end):
     return (start <= test <= end and start < end) or (not (end <= test <= start) and start > end)
 
 
-# return amount of seconds between two seconds after the hour
-def clock_len(start, end):
-    return end - start if end > start else end + 3600 - start
+# return amount of seconds between two times on the clock
+def secs_between(time1, time2):
+    return min((time1 - time2) % 3600, (time2 - time1) % 3600)
 
 
 # Return the s2sphere cellid token from a location
