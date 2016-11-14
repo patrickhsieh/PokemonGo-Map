@@ -47,7 +47,7 @@ from datetime import datetime, timedelta
 from geopy.distance import vincenty
 from .transform import get_new_coords
 from .models import hex_bounds, Pokemon, SpawnPoint, ScannedLocation, ScanSpawnPoint
-from .utils import now, cur_sec, cellid
+from .utils import now, cur_sec, cellid, date_secs
 
 log = logging.getLogger(__name__)
 
@@ -608,12 +608,12 @@ class SpeedScan(HexSearch):
 
         if best['score'] == 0:
 
-            log.debug('%s No locations need scanning', prefix)
+            log.info('%s No locations need scanning', prefix)
             return -1, 0, 0, 0
 
         if vincenty(loc, worker_loc).km > (now_date - last_action).total_seconds() * self.args.kph / 3600:
 
-            log.debug('%s Moving %d meters to step %d', prefix, vincenty(loc, worker_loc).m, step)
+            log.info('%s Moving %d meters to step %d', prefix, vincenty(loc, worker_loc).m, step)
             return -1, 0, 0, 0
 
         log.debug('Search step %d beginning (queue size is %d)', step, len(q))
@@ -643,12 +643,13 @@ class SpeedScan(HexSearch):
     def task_done(self, status, parsed=False):
         if parsed:
             # Record delay between spawn time and scanning for statistics
+            now_secs = date_secs(datetime.utcnow())
             item = self.queues[0][status['index_of_queue_item']]
             seconds_within_band = int((datetime.utcnow() - self.refresh_date).total_seconds()) + self.refresh_ms
-            start_delay = seconds_within_band - item['start'] - self.spawn_delay
+            start_delay = seconds_within_band - item['start'] - (self.spawn_delay if item['kind'] == 'spawn' else 0)
             safety_buffer = item['end'] - seconds_within_band
 
-            if safety_buffer <= 0:
+            if safety_buffer < 0:
                 log.warning('Too late by %d sec', -safety_buffer)
 
             # If we had a 0/0/0 scan, then unmark as done so we can retry, and save for Statistics
@@ -668,7 +669,7 @@ class SpeedScan(HexSearch):
                     # Did we find the spawn?
                     if sp_id in parsed['sp_id_list']:
                         self.spawns_found += 1
-                    else:
+                    elif start_delay > 0:  # not sure why this could be negative, but sometimes it is
 
                         # if not, record ID and put back in queue
                         self.spawns_missed_delay[sp_id] = self.spawns_missed_delay.get(sp_id, [])
@@ -679,7 +680,8 @@ class SpeedScan(HexSearch):
                 # For existing spawn points, if in any other queue items, mark 'scanned'
                 for sp_id in parsed['sp_id_list']:
                     for item in self.queues[0]:
-                        if sp_id == item.get('sp', None) and item.get('done', None) is None:
+                        if (sp_id == item.get('sp', None) and item.get('done', None) is None
+                            and now_secs > item['start'] and now_secs < item['end']):
                             item['done'] = 'Scanned'
 
 
