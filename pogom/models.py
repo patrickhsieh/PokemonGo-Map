@@ -1669,18 +1669,18 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
 
     db_update_queue.put((ScannedLocation, {0: scan_location}))
 
-    if len(spawn_points):
-        db_update_queue.put((SpawnPoint, spawn_points))
-        db_update_queue.put((ScanSpawnPoint, scan_spawn_points))
-        if len(sightings):
-            db_update_queue.put((SpawnpointDetectionData, sightings))
-
     if len(pokemons):
         db_update_queue.put((Pokemon, pokemons))
     if len(pokestops):
         db_update_queue.put((Pokestop, pokestops))
     if len(gyms):
         db_update_queue.put((Gym, gyms))
+    if len(spawn_points):
+        db_update_queue.put((SpawnPoint, spawn_points))
+        db_update_queue.put((ScanSpawnPoint, scan_spawn_points))
+        if len(sightings):
+            db_update_queue.put((SpawnpointDetectionData, sightings))
+
 
     return {
         'count': len(wild_pokemon) + len(forts),
