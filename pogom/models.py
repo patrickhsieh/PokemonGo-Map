@@ -10,7 +10,7 @@ import time
 import geopy
 import math
 from operator import itemgetter
-from peewee import SqliteDatabase, InsertQuery, Check, ForeignKeyField, \
+from peewee import SqliteDatabase, InsertQuery, Check, \
     IntegerField, CharField, DoubleField, BooleanField, \
     DateTimeField, fn, DeleteQuery, CompositeKey, FloatField, SQL, TextField
 from playhouse.flask_utils import FlaskDB
@@ -714,13 +714,22 @@ class ScannedLocation(BaseModel):
     # return list of dicts for upcoming valid band times
     @classmethod
     def linked_spawn_points(cls, cell):
-        query = (SpawnPoint
-                 .select()
-                 .join(ScanSpawnPoint)
-                 .join(cls)
-                 .where(cls.cellid == cell).dicts())
 
-        return list(query)
+        # unable to use a normal join, since MySQL produces foreignkey constraint errors when
+        # trying to upsert fields that are foreignkeys on another table
+
+
+        ''''        query = (SpawnPoint
+                        .select()
+                        .join(ScanSpawnPoint)
+                        .join(cls)
+                        .where(cls.cellid == cell).dicts())
+        '''
+        query = (ScanSpawnPoint
+                 .select(ScanSpawnPoint.spawnpoint)
+                 .where(ScanSpawnPoint.scannedlocation == cell).dicts())
+
+        return [SpawnPoint.get_by_id(i['spawnpoint']) for i in list(query)]
 
     # return list of dicts for upcoming valid band times
     @staticmethod
@@ -1096,8 +1105,12 @@ class SpawnPoint(BaseModel):
 
 
 class ScanSpawnPoint(BaseModel):
-    scannedlocation = ForeignKeyField(ScannedLocation)
-    spawnpoint = ForeignKeyField(SpawnPoint)
+    # removing ForeignKeyField due to MSQL issues with upserting rows that are foreignkeys for other tables
+    # scannedlocation = ForeignKeyField(ScannedLocation)
+    # spawnpoint = ForeignKeyField(SpawnPoint)
+
+    scannedlocation = CharField(max_length=54)
+    spawnpoint = CharField(max_length=54)
 
     class Meta:
         primary_key = CompositeKey('scannedlocation', 'spawnpoint')
@@ -1105,8 +1118,8 @@ class ScanSpawnPoint(BaseModel):
 
 class SpawnpointDetectionData(BaseModel):
     id = CharField(primary_key=True, max_length=54)
-    encounter_id = ForeignKeyField(Pokemon)
-    spawnpoint_id = ForeignKeyField(SpawnPoint)
+    encounter_id = CharField(max_length=54)  # removed ForeignKeyField since it caused MySQL issues
+    spawnpoint_id = CharField(max_length=54)  # removed ForeignKeyField since it caused MySQL issues
     scan_time = DateTimeField()
     tth_secs = IntegerField(null=True)
 
