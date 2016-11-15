@@ -472,13 +472,16 @@ class SpeedScan(HexSearch):
         return max((last_scan_date - datetime.utcnow()).total_seconds() + self.args.scan_delay, 2)
 
     def band_status(self):
-        bands_total = len(self.locations) * 5
-        bands_filled = ScannedLocation.bands_filled(self.locations)
-        if bands_total == bands_filled:
-            log.info('Initial spawnpoint scan is complete')
-        else:
-            log.info('Initial spawnpoint scan, %d of %d bands are done or %.1f%% complete',
-                     bands_filled, bands_total, bands_filled * 100 / bands_total)
+        try:
+            bands_total = len(self.locations) * 5
+            bands_filled = ScannedLocation.bands_filled(self.locations)
+            if bands_total == bands_filled:
+                log.info('Initial spawnpoint scan is complete')
+            else:
+                log.info('Initial spawnpoint scan, %d of %d bands are done or %.1f%% complete',
+                         bands_filled, bands_total, bands_filled * 100 / bands_total)
+        except Exception as e:
+            log.error('Exception in band_status: Exception message: {}'.format(e))
 
     # Update the queue, and provide a report on performance of last 9 minutes
     def schedule(self):
@@ -516,7 +519,7 @@ class SpeedScan(HexSearch):
                      spawns_all, spawns_timed, spawns_all - spawns_timed)
             scan_total = spawns_timed + bands_timed
             spm = scan_total / self.minutes
-            seconds_per_scan = self.minutes * 60 * self.args.workers / scan_total
+            seconds_per_scan = self.minutes * 60 * self.args.workers / scan_total if scan_total else 0
             log.info('%d scans over %d minutes, %d scans per minute, %d secs per scan per worker',
                      scan_total, self.minutes, spm, seconds_per_scan)
 
@@ -682,7 +685,6 @@ class SpeedScan(HexSearch):
                         # if not, record ID and put back in queue
                         self.spawns_missed_delay[sp_id] = self.spawns_missed_delay.get(sp_id, [])
                         self.spawns_missed_delay[sp_id].append(start_delay)
-                        log.warning('Spawn %s not there %d seconds since due. Ignoring.', sp_id, start_delay)
                         item['done'] = 'Scanned'
 
                 # For existing spawn points, if in any other queue items, mark 'scanned'
