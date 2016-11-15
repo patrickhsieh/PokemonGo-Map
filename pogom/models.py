@@ -1109,12 +1109,8 @@ class ScanSpawnPoint(BaseModel):
     # scannedlocation = ForeignKeyField(ScannedLocation)
     # spawnpoint = ForeignKeyField(SpawnPoint)
 
-    scannedlocation = CharField(max_length=54)
+    scannedlocation = CharField(primary_key=True, max_length=54)
     spawnpoint = CharField(max_length=54)
-
-    class Meta:
-        primary_key = CompositeKey('scannedlocation', 'spawnpoint')
-
 
 class SpawnpointDetectionData(BaseModel):
     id = CharField(primary_key=True, max_length=54)
@@ -1902,11 +1898,15 @@ def bulk_upsert(cls, data):
             InsertQuery(cls, rows=data.values()[i:min(i + step, num_rows)]).upsert().execute()
         except Exception as e:
             # if there is a DB table constraint error, dump the data and don't retry
-            if 'constraint' in str(e) or 'has no attribute' in str(e):
+            #unrecoverable error strings:
+            unrecoverable = ['constraint', 'has no attribute', 'peewee.IntegerField object at']
+            has_unrecoverable = filter(lambda x: x in str(e), unrecoverable)
+            if has_unrecoverable:
                 log.warning('%s. Data is:', e)
                 log.warning(data.items())
             else:
                 log.warning('%s... Retrying', e)
+                time.sleep(1)
                 continue
 
         i += step
