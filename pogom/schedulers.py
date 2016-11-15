@@ -440,7 +440,7 @@ class SpeedScan(HexSearch):
         self.band_status()
         spawnpoints = SpawnPoint.select_in_hex(self.scan_location, self.args.step_limit)
         if not spawnpoints:
-            log.info('No spawnpoints in hex found in SpawnPoint table. Pulling spawnpoints from Pokemon spawn history.')
+            log.info('No spawnpoints in hex found in SpawnPoint table. Doing initial scan.')
         log.info('Found %d spawn points within hex', len(spawnpoints))
 
         log.info('Assigning spawn points to scans')
@@ -523,7 +523,7 @@ class SpeedScan(HexSearch):
 
             sum = spawns_all + spawns_missed
             if sum:
-                log.info('%d Pokemon found, and %d were missed for %.1f%% found',
+                log.info('%d Pokemon found, and %d were not reached in time for %.1f%% found',
                          spawns_all, spawns_missed, spawns_all * 100 / (spawns_all + spawns_missed))
 
             if spawns_timed:
@@ -534,7 +534,7 @@ class SpeedScan(HexSearch):
                 spawns_missed = reduce(lambda x, y: x + len(y), self.spawns_missed_delay.values(), 0)
                 sum = spawns_missed + self.spawns_found
                 percent = self.spawns_found * 100 / sum if sum else 0
-                log.info('%d spawns found as expected and %d spawns missed for %d%% found',
+                log.info('%d spawns scanned and %d spawns were not there when expected for %d%%',
                          self.spawns_found, spawns_missed, percent)
                 self.spawn_percent.append(percent)
                 if self.spawns_missed_delay:

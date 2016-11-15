@@ -99,7 +99,6 @@ class Pokemon(BaseModel):
     @staticmethod
     def get_active(swLat, swLng, neLat, neLng, timestamp=0, oSwLat=None, oSwLng=None, oNeLat=None, oNeLng=None):
         now_date = datetime.utcnow()
-        now_secs = date_secs(now_date)
         query = Pokemon.select()
         if not (swLat and swLng and neLat and neLng):
             query = (query
@@ -144,12 +143,13 @@ class Pokemon(BaseModel):
         gc.disable()
 
         pokemons = []
-        for p in query:
+        for p in list(query):
 
-            sp = SpawnPoint.get_by_id(p['spawnpoint_id'])
-            hidden = SpawnPoint.hidden(sp)
-            if hidden and clock_between(hidden[0], now_secs, hidden[1]):
-                continue
+            # commenting out since it appears currently no hidden spawns times
+            # sp = SpawnPoint.get_by_id(p['spawnpoint_id'])
+            # hidden = SpawnPoint.hidden(sp)
+            # if hidden and clock_between(hidden[0], now_secs, hidden[1]):
+            #    continue
 
             p['pokemon_name'] = get_pokemon_name(p['pokemon_id'])
             p['pokemon_rarity'] = get_pokemon_rarity(p['pokemon_id'])
@@ -1553,13 +1553,13 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
             else:
                 if encounter_result is not None and 'wild_pokemon' not in encounter_result['responses']['ENCOUNTER']:
                     log.warning("Error encountering {}, status code: {}".format(p['encounter_id'], encounter_result['responses']['ENCOUNTER']['status']))
-                    pokemons[p['encounter_id']].update({
-                        'individual_attack': None,
-                        'individual_defense': None,
-                        'individual_stamina': None,
-                        'move_1': None,
-                        'move_2': None,
-                    })
+                pokemons[p['encounter_id']].update({
+                    'individual_attack': None,
+                    'individual_defense': None,
+                    'individual_stamina': None,
+                    'move_1': None,
+                    'move_2': None,
+                })
 
             if args.webhooks:
 
