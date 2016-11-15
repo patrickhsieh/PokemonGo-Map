@@ -885,7 +885,7 @@ class WorkerStatus(BaseModel):
                  .where((WorkerStatus.username == username))
                  .dicts())
 
-        return query[0] if query else None
+        return query[0] if len(query) else None
 
 
 class SpawnPoint(BaseModel):
@@ -895,7 +895,7 @@ class SpawnPoint(BaseModel):
     last_scanned = DateTimeField(index=True)
     # kind gives the four quartiles of the spawn, as 's' for seen or 'h' for hidden
     # for example, a double spawn (1x45h2) is 'shsh'
-    kind = CharField(max_length=4, default='shhh')
+    kind = CharField(max_length=4, default='hhhs')
 
     # links shows whether a pokemon encounter id changes between quartiles or stays the same
     # both 1x45 and 1x60h3 have the kind of 'sssh', but the different links shows when the 
@@ -936,7 +936,7 @@ class SpawnPoint(BaseModel):
             'latitude': latitude,
             'longitude': longitude,
             'last_scanned': None,  # Null value used as new flag
-            'kind': 'shhh',
+            'kind': 'hhhs',
             'links': '????',
             'missed_count': 0,
             'latest_seen': None,
@@ -1153,7 +1153,7 @@ class SpawnpointDetectionData(BaseModel):
             sp['links'] = 'h+h-'  # assumption until clarified below
 
         else:
-            # convert the duration into a 'shhh', 'sshh', 'sssh', 'ssss' string accordingly
+            # convert the duration into a 'hhhs', 'hhss', 'hsss', 'ssss' string accordingly
             # 's' is for seen, 'h' is for hidden
             sp['kind'] = ''.join(['s' if i > (3 - duration/15) else 'h' for i in range(0, 4)])
 
@@ -1213,7 +1213,7 @@ class SpawnpointDetectionData(BaseModel):
                             u[1] = end if not(clock_between(u[0], end, u[1])) else u[1]
                         elif clock_between(u[0], end, u[1]):
                             u[0] = start if not(clock_between(u[0], start, u[1])) else u[0]
-                        else:
+                        elif union.count([start, end]) == 0:
                             union.append([start, end])
 
                 # Are no more unions possible?
@@ -1223,7 +1223,7 @@ class SpawnpointDetectionData(BaseModel):
                     start_end_list = union  # Make another pass looking for unions
 
             # if more than one disparate union, take the largest as our starting point
-            union = reduce(lambda x, y: x if (x[0] - x[1]) % 3600 > (y[0] - y[1]) % 3600 else y,
+            union = reduce(lambda x, y: x if (x[1] - x[0]) % 3600 > (y[1] - y[0]) % 3600 else y,
                             union, [0, 3600])
             sp['latest_seen'] = union[1]
             sp['earliest_unseen'] = union[0]
@@ -1232,17 +1232,19 @@ class SpawnpointDetectionData(BaseModel):
 
         # only non 'ssss' spawns from here below
 
-        # new latest seen will be just before max_gap
-        sp['latest_seen'] = seen_secs[gap_list.index(max_gap)]
+        if not sp['earliest_unseen'] or sp['earliest_unseen'] != sp['latest_seen']:
+            
+            # new latest seen will be just before max_gap
+            sp['latest_seen'] = seen_secs[gap_list.index(max_gap)]
 
-        # if we don't have a earliest_unseen yet or it's farther than duration min past the earliest_seen
-        # set to latest_seen + 15 min
-        if sp['kind'] != old_kind:
-            sp['earliest_unseen'] = (sp['latest_seen'] + 900) % 3600
+            # if we don't have a earliest_unseen yet or it's farther than duration min past the earliest_seen
+            # set to latest_seen + 15 min
+            if not sp['earliest_unseen'] or sp['kind'] != old_kind:
+                sp['earliest_unseen'] = (sp['latest_seen'] + 900) % 3600
 
         # a 15 min spawn has obvious links, so fill in and return
-        if sp['kind'] == 'shhh':
-            sp['links'] = '-hhh'
+        if sp['kind'] == 'hhhs':
+            sp['links'] = 'hhh-'
             return
             
         # don't bother checking links until loc fully scanned and we have found the tth
@@ -1506,9 +1508,6 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                 skipped += 1
                 continue
             
-            # what quartile are we in?
-            now_quartile = SpawnPoint.get_quartile(now_secs, sp)
-
             # give a buffer of 60 seconds life, since if no TTH, it will be around at least that long
             if sp['latest_seen'] == sp['earliest_unseen'] or (sp['latest_seen'] - now_secs) % 3600 > 60:
                 latest = sp['latest_seen']
@@ -1529,9 +1528,6 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                                                  spawn_point_id=p['spawn_point_id'],
                                                  player_latitude=step_location[0],
                                                  player_longitude=step_location[1])
-
-            # adjust the disappear time for pokemon that go through hidden quartiles
-            now_quartile = SpawnPoint.get_quartile(now_secs, sp)
 
             pokemons[p['encounter_id']] = {
                 'encounter_id': b64encode(str(p['encounter_id'])),

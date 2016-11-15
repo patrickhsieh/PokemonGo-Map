@@ -608,12 +608,12 @@ class SpeedScan(HexSearch):
 
         if best['score'] == 0:
 
-            log.info('%s No locations need scanning', prefix)
+            log.debug('%s No locations need scanning', prefix)
             return -1, 0, 0, 0
 
         if vincenty(loc, worker_loc).km > (now_date - last_action).total_seconds() * self.args.kph / 3600:
 
-            log.info('%s Moving %d meters to step %d', prefix, vincenty(loc, worker_loc).m, step)
+            log.debug('%s Moving %d meters to step %d', prefix, vincenty(loc, worker_loc).m, step)
             return -1, 0, 0, 0
 
         log.debug('Search step %d beginning (queue size is %d)', step, len(q))
