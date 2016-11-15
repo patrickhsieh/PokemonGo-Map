@@ -148,7 +148,7 @@
       -speed [SPEED_SCANNING], Use hex scanning with 5 passes per hour to identify
                             spawns, and then transition to spawn scanning based on
                             closest spawn to the worker.
-      -kph                  Set speed limit in kilometers/hour. Default is 80 kp/h
+      -kph                  Set speed limit in kilometers/hour. Default is 35 kp/h
                             For use with -speed scanning.
       --dump-spawnpoints    dump the spawnpoints from the db to json (only for use
                             with -ss) [env var: POGOMAP_DUMP_SPAWNPOINTS]

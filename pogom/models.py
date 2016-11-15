@@ -728,7 +728,7 @@ class ScannedLocation(BaseModel):
                  .select(ScanSpawnPoint.spawnpoint)
                  .where(ScanSpawnPoint.scannedlocation == cell).dicts())
 
-        return [SpawnPoint.get_by_id(i['spawnpoint']) for i in list(query)]
+        return [i['spawnpoint'] for i in list(query)]
 
     # return list of dicts for upcoming valid band times
     @staticmethod
@@ -901,7 +901,7 @@ class SpawnPoint(BaseModel):
     longitude = DoubleField()
     last_scanned = DateTimeField(index=True)
     # kind gives the four quartiles of the spawn, as 's' for seen or 'h' for hidden
-    # for example, a double spawn (1x45h2) is 'shsh'
+    # for example, a 30 minute spawn is 'hhss'
     kind = CharField(max_length=4, default='hhhs')
 
     # links shows whether a pokemon encounter id changes between quartiles or stays the same
@@ -1020,9 +1020,11 @@ class SpawnPoint(BaseModel):
     def get_times(cls, cell, scan, now_date, scan_delay):
         l = []
         now_secs = date_secs(now_date)
-        for sp in ScannedLocation.linked_spawn_points(cell):
+        for sp_id in ScannedLocation.linked_spawn_points(cell):
 
-            if sp['missed_count'] > 4:
+            sp = SpawnPoint.get_by_id(sp_id)
+
+            if sp['missed_count'] > 5:
                 continue
 
             endpoints = SpawnPoint.start_end(sp)
@@ -1129,7 +1131,6 @@ class SpawnpointDetectionData(BaseModel):
         # get past sightings
         query = list(cls.select()
                         .where(cls.spawnpoint_id == sp['id'])
-                        .order_by(cls.scan_time.asc())
                         .dicts())
 
         if sighting:
@@ -1235,7 +1236,7 @@ class SpawnpointDetectionData(BaseModel):
                            union, [0, 3600])
             sp['latest_seen'] = union[1]
             sp['earliest_unseen'] = union[0]
-            log.info('1x60: appear %d, despawn %d, duration %d', union[0], union[1], (union[1] - union[0]) % 3600)
+            log.info('1x60: appear %d, despawn %d, duration: %d min', union[0], union[1], ((union[1] - union[0]) % 3600) / 60)
             return
 
         # only non 'ssss' spawns from here below
@@ -1439,7 +1440,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
 
     # Check for a 0/0/0 bad scan
     # If we saw nothing and there should be visible forts, it's bad
-    if ScannedLocation.visible_forts(step_location) and not len(wild_pokemon) and not len(forts):
+    if not len(wild_pokemon) and not len(forts) and ScannedLocation.visible_forts(step_location):
         log.warning('Bad scan. Parsing found 0/0/0 pokemons/pokestops/gyms')
         return {
             'count': 0,
@@ -1487,7 +1488,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
             if valid_tth:
                 d_t_secs = date_secs(datetime.utcfromtimestamp((p['last_modified_timestamp_ms'] + p['time_till_hidden_ms']) / 1000.0))
                 if sp['latest_seen'] != sp['earliest_unseen']:
-                    log.info('New tth found for spawnpoint %s', sp['id'])
+                    log.info('TTH found for spawnpoint %s', sp['id'])
                     sighting['tth_secs'] = d_t_secs
                 sp['latest_seen'] = d_t_secs
                 sp['earliest_unseen'] = d_t_secs
@@ -1671,10 +1672,15 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
     log.debug('Skipped %d Pokemons and %d pokestops.', skipped, stopsskipped)
 
     # look for spawnpoints within scan_location that are not here to see if can narrow down tth window
-    for sp in ScannedLocation.linked_spawn_points(scan_location['cellid']):
-        if not sp['id'] in sp_id_list:
+    for sp_id in ScannedLocation.linked_spawn_points(scan_location['cellid']):
+        if sp_id not in sp_id_list:
             if (len(nearby_pokemons) or len(wild_pokemon)):
+                sp = SpawnPoint.get_by_id(sp_id)
                 SpawnpointDetectionData.unseen(sp, now_secs)
+                endpoints = SpawnPoint.start_end(sp)
+                if clock_between(endpoints[0], now_secs, endpoints[1]):
+                    sp['missed_count'] += 1
+                    log.warning('SpawnPoint %s has no pokemon for the %d times in a row', sp['id'], sp['missed_count'])
 
     db_update_queue.put((ScannedLocation, {0: scan_location}))
 

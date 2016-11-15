@@ -516,8 +516,9 @@ class SpeedScan(HexSearch):
                      spawns_all, spawns_timed, spawns_all - spawns_timed)
             scan_total = spawns_timed + bands_timed
             spm = scan_total / self.minutes
-            log.info('%d scans over %d minutes, gives %d scans per minute or %d per worker per minute',
-                     scan_total, self.minutes, spm, spm / self.args.workers)
+            seconds_per_scan = self.minutes * 60 * self.args.workers / scan_total
+            log.info('%d scans over %d minutes, %d scans per minute, %d secs per scan per worker',
+                     scan_total, self.minutes, spm, seconds_per_scan)
 
             self.band_status()
 
@@ -587,14 +588,21 @@ class SpeedScan(HexSearch):
             if ms < item['start']:
                 break
 
-            n += 1
             loc = item['loc']
+            distance = vincenty(loc, worker_loc).km
+            secs_to_arrival = distance / self.args.kph * 3600
+
+            # if we can't make it there before it disappears, don't bother trying
+            if ms + secs_to_arrival > item['end']:
+                continue
+
+            n += 1
 
             # Bands are top priority to find new spawns first
             score = 1000 if item['kind'] == 'band' else 1
 
             # For spawns, score is purely based on how close they are to last worker position
-            score = score / (vincenty(loc, worker_loc).km + .01)
+            score = score / (distance + .01)
 
             if score > best['score']:
                 best = {'score': score, 'i': i}

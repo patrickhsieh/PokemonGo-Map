@@ -159,7 +159,8 @@ def get_args():
     parser.add_argument('-ss', '--spawnpoint-scanning',
                         help='Use spawnpoint scanning (instead of hex grid). Scans in a circle based on step_limit when on DB', nargs='?', const='nofile', default=False)
     parser.add_argument('-speed', '--speed-scan',
-                        help='Use speed scanning to identify spawn points, and then scan closest spawns.', nargs='?', const='nofile', default=False)
+                        help='Use speed scanning to identify spawn points and then scan closest spawns.',
+                        action='store_true', default=False)
     parser.add_argument('-kph', '--kph',
                         help='Set a maximum speed in km/hour for scanner movement', type=int, default=35)
     parser.add_argument('--dump-spawnpoints', help='dump the spawnpoints from the db to json (only for use with -ss)',
