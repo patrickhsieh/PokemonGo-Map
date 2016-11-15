@@ -12,7 +12,7 @@ import math
 from operator import itemgetter
 from peewee import SqliteDatabase, InsertQuery, Check, \
     IntegerField, CharField, DoubleField, BooleanField, \
-    DateTimeField, fn, DeleteQuery, CompositeKey, FloatField, SQL, TextField
+    DateTimeField, fn, DeleteQuery, FloatField, SQL, TextField
 from playhouse.flask_utils import FlaskDB
 from playhouse.pool import PooledMySQLDatabase
 from playhouse.shortcuts import RetryOperationalError
@@ -718,7 +718,6 @@ class ScannedLocation(BaseModel):
         # unable to use a normal join, since MySQL produces foreignkey constraint errors when
         # trying to upsert fields that are foreignkeys on another table
 
-
         ''''        query = (SpawnPoint
                         .select()
                         .join(ScanSpawnPoint)
@@ -1112,6 +1111,7 @@ class ScanSpawnPoint(BaseModel):
     scannedlocation = CharField(primary_key=True, max_length=54)
     spawnpoint = CharField(max_length=54)
 
+
 class SpawnpointDetectionData(BaseModel):
     id = CharField(primary_key=True, max_length=54)
     encounter_id = CharField(max_length=54)  # removed ForeignKeyField since it caused MySQL issues
@@ -1152,7 +1152,7 @@ class SpawnpointDetectionData(BaseModel):
 
         # an hour (60 min) minus the largest gap in minutes gives us the duration the spawn was there
         # round up to the nearest 15 min interval for our current best duration guess
-        duration = (int((60 - max_gap / 60) / 15) + 1) * 15
+        duration = (int((60 - max_gap / 60.0) / 15) + 1) * 15
 
         # if the second largest gap is larger than 15 minutes, then there are two gaps that are
         # greater than 15 min, so it must be a double-spawn
@@ -1690,7 +1690,6 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
         if len(sightings):
             db_update_queue.put((SpawnpointDetectionData, sightings))
 
-
     return {
         'count': len(wild_pokemon) + len(forts),
         'gyms': gyms,
@@ -1898,7 +1897,7 @@ def bulk_upsert(cls, data):
             InsertQuery(cls, rows=data.values()[i:min(i + step, num_rows)]).upsert().execute()
         except Exception as e:
             # if there is a DB table constraint error, dump the data and don't retry
-            #unrecoverable error strings:
+            # unrecoverable error strings:
             unrecoverable = ['constraint', 'has no attribute', 'peewee.IntegerField object at']
             has_unrecoverable = filter(lambda x: x in str(e), unrecoverable)
             if has_unrecoverable:
