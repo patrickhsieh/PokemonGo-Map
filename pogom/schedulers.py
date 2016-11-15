@@ -680,8 +680,8 @@ class SpeedScan(HexSearch):
                 # For existing spawn points, if in any other queue items, mark 'scanned'
                 for sp_id in parsed['sp_id_list']:
                     for item in self.queues[0]:
-                        if (sp_id == item.get('sp', None) and item.get('done', None) is None
-                            and now_secs > item['start'] and now_secs < item['end']):
+                        if (sp_id == item.get('sp', None) and item.get('done', None) is None and
+                                now_secs > item['start'] and now_secs < item['end']):
                             item['done'] = 'Scanned'
 
 
