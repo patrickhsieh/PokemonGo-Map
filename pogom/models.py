@@ -1505,7 +1505,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                     log.warning('Redoing scan of this location to identify new spawnpoint.')
                     ScannedLocation.reset_bands(scan_location)
 
-            if not SpawnPoint.identified(sp) or sighting['tth_secs']:
+            if not SpawnPoint.identified(sp) or sighting['tth_secs'] or not scan_location['done']:
                 sightings[p['encounter_id']] = sighting
 
             SpawnpointDetectionData.classify(sp, scan_location, now_secs, sighting)

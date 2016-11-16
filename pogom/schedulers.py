@@ -512,6 +512,7 @@ class SpeedScan(HexSearch):
             bands_timed = len(filter(lambda e: e['kind'] == 'band', Timed_list))
             spawns_all = spawns_timed + len(filter(lambda e: e['kind'] == 'spawn', Scanned_list))
             spawns_missed = len(filter(lambda e: e['kind'] == 'spawn', Missed_list))
+            self.band_status()
 
             log.info('Over last %d minutes: %d new bands, %d Pokemon found',
                      self.minutes, bands_timed, spawns_all)
@@ -522,8 +523,6 @@ class SpeedScan(HexSearch):
             seconds_per_scan = self.minutes * 60 * self.args.workers / scan_total if scan_total else 0
             log.info('%d scans over %d minutes, %d scans per minute, %d secs per scan per worker',
                      scan_total, self.minutes, spm, seconds_per_scan)
-
-            self.band_status()
 
             sum = spawns_all + spawns_missed
             if sum:
