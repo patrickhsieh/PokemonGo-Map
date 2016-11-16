@@ -1125,7 +1125,7 @@ class SpawnpointDetectionData(BaseModel):
     def classify(cls, sp, scan_loc, now_secs, sighting=None):
 
         # return if already fully classified
-        if SpawnPoint.identified(sp):
+        if SpawnPoint.identified(sp) and scan_loc['done']:
             return
 
         # get past sightings
