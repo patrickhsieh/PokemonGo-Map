@@ -951,15 +951,6 @@ class SpawnPoint(BaseModel):
 
         }
 
-    # Check if spawn points are in any of the existing spannedlocation records
-    # Update scan_spawn_points for DB bulk upserting
-    @staticmethod
-    def add_to_scans(sp, scan_spawn_points):
-        for sl in ScannedLocation.select():
-            if in_radius((sp['latitude'], sp['longitude']), (sl.latitude, sl.longitude), 0.07):
-                scan_spawn_points[sl.cellid + sp['id']] = {'spawnpoint': sp['id'],
-                                                           'scannedlocation': sl.cellid}
-
     # Confirm if spawnpoint is fully identified
     @staticmethod
     def identified(sp):
@@ -1496,7 +1487,8 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
             if not sp['last_scanned']:
                 log.info('New Spawn Point found!')
                 new_spawn_points.append(sp)
-                SpawnPoint.add_to_scans(sp, scan_spawn_points)
+                scan_spawn_points[scan_location['cellid'] + sp['id']] = {'spawnpoint': sp['id'],
+                    'scannedlocation': scan_location['cellid']}
 
                 # if we found a new spawnpoint after the location was already fully scanned
                 # either it's new, or we had a bad scan. Either way, rescan the loc
