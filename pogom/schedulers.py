@@ -39,7 +39,6 @@ import logging
 import math
 import geopy
 import json
-import LatLon
 import time
 from collections import Counter
 from queue import Empty
@@ -459,67 +458,53 @@ class SpeedScan(HexSearch):
     # requiring rescanning since it didn't recognize the location in the ScannedLocation table
     def _generate_locations(self):
 
-        R = 6378137.0
-        hex_radius = 60.62  # probably not correct
-        d = 2.0 * hex_radius / 1000.0  # convert that into a diameter and convert to gps scale
-        d_s = d
+        NORTH = 0
+        EAST = 90
+        SOUTH = 180
+        WEST = 270
 
-        brng_s = 0.0
-        brng = 0.0
-        mod = math.degrees(math.atan(1.732 / 3))
-
-        steps = (((self.step_limit * (self.step_limit - 1)) * 3) + 1)  # this mathamtically calculates the total number of workers
-
-        locations = [LatLon.LatLon(LatLon.Latitude(0), LatLon.Longitude(0))] * steps  # this initialises the list
-        locations[0] = LatLon.LatLon(LatLon.Latitude(self.scan_location[0]),
-                                     LatLon.Longitude(self.scan_location[1]))  # set the latlon for worker 0 from cli args
-
-        turns = 0               # number of turns made in this ring (0 to 6)
-        turn_steps = 0          # number of cells required to complete one turn of the ring
-        turn_steps_so_far = 0   # current cell number in this side of the current ring
+        xdist = math.sqrt(3) * self.step_distance  # dist between column centers
+        ydist = 3 * (self.step_distance / 2)       # dist between row centers
 
         results = []
 
-        results.append((self.scan_location[0], self.scan_location[1], 0))
+        loc = self.scan_location
+        results.append((loc[0], loc[1], 0))
 
-        for i in range(1, steps):
-            if turns == 6 or turn_steps == 0:
-                # we have completed a ring (or are starting the very first ring)
-                turns = 0
-                turn_steps += 1
-                turn_steps_so_far = 0
+        # upper part
+        for ring in range(1, self.step_limit):
 
-            if turn_steps_so_far == 0:
-                brng = brng_s
-                loc = locations[0]
-                d = turn_steps * d
-            else:
-                loc = locations[0]
-                C = math.radians(60.0)  # inside angle of a regular hexagon
-                a = d_s / R * 2.0 * math.pi  # in radians get the arclength of the unit circle covered by d_s
-                b = turn_steps_so_far * d_s / turn_steps / R * 2.0 * math.pi  # percentage of a
-                # the first spherical law of cosines gives us the length of side c from known angle C
-                c = math.acos(math.cos(a) * math.cos(b) + math.sin(a) * math.sin(b) * math.cos(C))
-                # turnsteps here represents ring number because yay coincidence always the same. multiply by derived arclength and convert to meters
-                d = turn_steps * c * R / 2.0 / math.pi
-                # from the first spherical law of cosines we get the angle A from the side lengths a b c
-                A = math.acos((math.cos(b) - math.cos(a) * math.cos(c)) / (math.sin(c) * math.sin(a)))
-                brng = 60 * turns + math.degrees(A)
+            for i in range(max(ring - 1, 1)):
+                if ring > 1:
+                    loc = get_new_coords(loc, ydist, NORTH)
 
-            loc = loc.offset(brng + mod, d)
-            locations[i] = loc
-            d = d_s
+                loc = get_new_coords(loc, xdist / (1 + (ring > 1)), WEST)
+                results.append((loc[0], loc[1], 0))
 
-            turn_steps_so_far += 1
-            if turn_steps_so_far >= turn_steps:
-                # make a turn
-                brng_s += 60.0
-                brng = brng_s
-                turns += 1
-                turn_steps_so_far = 0
+            for i in range(ring):
+                loc = get_new_coords(loc, ydist, NORTH)
+                loc = get_new_coords(loc, xdist / 2, EAST)
+                results.append((loc[0], loc[1], 0))
 
-        return [(step, (float(location.to_string()[0]), float(location.to_string()[1]), 0), 0, 0)
-                for step, location in enumerate(locations)]
+            for i in range(ring):
+                loc = get_new_coords(loc, xdist, EAST)
+                results.append((loc[0], loc[1], 0))
+
+            for i in range(ring):
+                loc = get_new_coords(loc, ydist, SOUTH)
+                loc = get_new_coords(loc, xdist / 2, EAST)
+                results.append((loc[0], loc[1], 0))
+
+            for i in range(ring):
+                loc = get_new_coords(loc, ydist, SOUTH)
+                loc = get_new_coords(loc, xdist / 2, WEST)
+                results.append((loc[0], loc[1], 0))
+
+            for i in range(ring + (ring + 1 < self.step_limit)):
+                loc = get_new_coords(loc, xdist, WEST)
+                results.append((loc[0], loc[1], 0))
+
+        return [(step, (location[0], location[1], 0), 0, 0) for step, location in enumerate(results)]
 
     def getsize(self):
         return len(self.queues[0])

@@ -1488,7 +1488,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                 log.info('New Spawn Point found!')
                 new_spawn_points.append(sp)
                 scan_spawn_points[scan_location['cellid'] + sp['id']] = {'spawnpoint': sp['id'],
-                    'scannedlocation': scan_location['cellid']}
+                                                                         'scannedlocation': scan_location['cellid']}
 
                 # if we found a new spawnpoint after the location was already fully scanned
                 # either it's new, or we had a bad scan. Either way, rescan the loc
