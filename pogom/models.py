@@ -773,7 +773,7 @@ class ScannedLocation(BaseModel):
             end = end if end >= nowms else end + 3600
 
             if end < min['end']:
-                min = cls._q_init(scan, end - radius * 2, end, 'band')
+                min = cls._q_init(scan, end - radius * 2 + 10, end, 'band')
 
         return [min] if min['end'] < max else []
 
