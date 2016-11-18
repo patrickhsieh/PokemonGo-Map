@@ -1037,7 +1037,7 @@ class SpawnPoint(BaseModel):
             # target mid point between start and end as point to scan
             start = (start + int((end - start) % 3600 / 2)) % 3600
 
-            cls.add_if_not_scanned_yet('search', l, sp, scan, start, end, now_date, now_secs)
+            cls.add_if_not_scanned_yet('TTH', l, sp, scan, start, end, now_date, now_secs)
 
         return l
 
@@ -1238,9 +1238,9 @@ class SpawnpointDetectionData(BaseModel):
             sp['latest_seen'] = seen_secs[gap_list.index(max_gap)]
 
             # if we don't have a earliest_unseen yet or it's farther than duration min past the earliest_seen
-            # set to latest_seen + 15 min
+            # set to latest_seen + 14 min
             if not sp['earliest_unseen'] or sp['kind'] != old_kind:
-                sp['earliest_unseen'] = (sp['latest_seen'] + 900) % 3600
+                sp['earliest_unseen'] = (sp['latest_seen'] + 14 * 60) % 3600
 
         # a 15 min spawn has obvious links, so fill in and return
         if sp['kind'] == 'hhhs':
@@ -1313,13 +1313,13 @@ class SpawnpointDetectionData(BaseModel):
         if sp['latest_seen'] == sp['earliest_unseen']:
             return False
 
-        # if now_secs is closer to the latest seen than the current earliest unseen, replace it
-        if (now_secs - sp['latest_seen']) % 3600 < (sp['earliest_unseen'] - sp['latest_seen']) % 3600:
-            sp['earliest_unseen'] = now_secs
+        # if now_secs is later than the latest seen return
+        if not clock_between(sp['latest_seen'], now_secs, sp['earliest_unseen']):
+            return False
 
-        if (sp['latest_seen'] - now_secs) % 3600 < 60:
-            log.warning('Spawnpoint %s was unable to locate a TTH, even with %s before end of spawn',
-                        sp['id'], (sp['latest_seen'] - now_secs) % 3600)
+        sp['earliest_unseen'] = now_secs
+
+        return True
 
     # expand a 30 minute spawn with a new seen point based on which endpoint it is closer to
     # return true if sp changed
@@ -1461,7 +1461,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
         for p in wild_pokemon:
 
             sp = SpawnPoint.get_by_id(p['spawn_point_id'], p['latitude'], p['longitude'])
-            spawn_points[p['encounter_id']] = sp
+            spawn_points[p['spawn_point_id']] = sp
 
             sighting = {
                 'id': b64encode(str(p['encounter_id'])) + '_' + str(now_secs),
@@ -1665,14 +1665,29 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
 
     # look for spawnpoints within scan_location that are not here to see if can narrow down tth window
     for sp_id in ScannedLocation.linked_spawn_points(scan_location['cellid']):
-        if sp_id not in sp_id_list:
+        if sp_id in sp_id_list:
+            sp = spawn_points[sp_id]
+        # not seen and not a speed violation
+        else:
+            sp = SpawnPoint.get_by_id(sp_id)
             if (len(nearby_pokemons) or len(wild_pokemon)):
-                sp = SpawnPoint.get_by_id(sp_id)
-                SpawnpointDetectionData.unseen(sp, now_secs)
+                if SpawnpointDetectionData.unseen(sp, now_secs):
+                    spawn_points[sp['id']] = sp
                 endpoints = SpawnPoint.start_end(sp)
                 if clock_between(endpoints[0], now_secs, endpoints[1]):
                     sp['missed_count'] += 1
-                    log.warning('SpawnPoint %s has no pokemon for the %d times in a row', sp['id'], sp['missed_count'])
+                    spawn_points[sp['id']] = sp
+                    log.warning('%d minute spawnpoint %s has no pokemon %d times in a row',
+                                sp['kind'].count('s') * 15, sp['id'], sp['missed_count'])
+
+        if (sp['latest_seen'] != sp['earliest_unseen'] and
+                (sp['latest_seen'] - sp['earliest_unseen']) % 3600 < 60):
+            log.warning('Spawnpoint %s was unable to locate a TTH, even with %s before end of spawn',
+                        sp['id'], (sp['latest_seen'] - sp['earliest_unseen']) % 3600)
+            log.info('Embiggening search for TTH by 15 minutes to try again')
+            sp['latest_seen'] = (sp['latest_seen'] - 60) % 3600
+            sp['earliest_unseen'] = (sp['earliest_unseen'] + 14 * 60) % 3600
+            spawn_points[sp['id']] = sp
 
     db_update_queue.put((ScannedLocation, {0: scan_location}))
 

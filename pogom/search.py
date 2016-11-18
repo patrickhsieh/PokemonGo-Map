@@ -20,6 +20,8 @@ Search Architecture:
 import logging
 import math
 import os
+import sys
+import traceback
 import random
 import time
 import geopy
@@ -132,8 +134,9 @@ def status_printer(threadStatus, search_items_queue, db_updates_queue, wh_queue,
             # Print status of overseer
             status_text.append('{} Overseer: {}'.format(threadStatus['Overseer']['scheduler'], threadStatus['Overseer']['message']))
 
-            # Calculate the total number of pages.  Subtracting 1 for the overseer.
-            total_pages = math.ceil((len(threadStatus) - 1) / float(usable_height))
+            # Calculate the total number of pages.  Subtracting for the overseer.
+            total_pages = math.ceil((len(threadStatus) - 1 - threadStatus['Overseer']['message'].count('\n')) /
+                                    float(usable_height))
 
             # Prevent moving outside the valid range of pages
             if current_page[0] > total_pages:
@@ -473,8 +476,8 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
                         break
 
                 # Grab the next thing to search (when available)
-                status['message'] = 'Waiting for item from queue'
-                step, step_location, appears, leaves = scheduler.next_item(status)
+                step, step_location, appears, leaves, messages = scheduler.next_item(status)
+                status['message'] = messages['wait']
 
                 # Using step as a flag for no valid next location returned
                 if step == -1:
@@ -489,8 +492,7 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
                         if pause_bit.is_set():
                             paused = True
                             break  # why can't python just have `break 2`...
-                        remain = appears - now() + 10
-                        status['message'] = 'Early for {:6f},{:6f}; waiting {}s...'.format(step_location[0], step_location[1], remain)
+                        status['message'] = messages['early']
                         if first_loop:
                             log.info(status['message'])
                             first_loop = False
@@ -504,12 +506,12 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
                     scheduler.task_done(status)
                     status['skip'] += 1
                     # it is slightly silly to put this in status['message'] since it'll be overwritten very shortly after. Oh well.
-                    status['message'] = 'Too late for location {:6f},{:6f}; skipping'.format(step_location[0], step_location[1])
+                    status['message'] = messages['late']
                     log.info(status['message'])
                     # No sleep here; we've not done anything worth sleeping for. Plus we clearly need to catch up!
                     continue
 
-                status['message'] = 'Searching at {:6f},{:6f}'.format(step_location[0], step_location[1])
+                status['message'] = messages['search']
                 log.debug(status['message'])
 
                 # Let the api know where we intend to be for this loop
@@ -521,7 +523,7 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
                 check_login(args, account, api, step_location, status['proxy_url'])
 
                 # putting this message after the check_login so the messages aren't out of order
-                status['message'] = 'Searching at {:6f},{:6f}'.format(step_location[0], step_location[1])
+                status['message'] = messages['search']
                 log.info(status['message'])
 
                 # Make the actual request (finally!)
@@ -536,7 +538,7 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
                 if not response_dict:
                     status['fail'] += 1
                     consecutive_fails += 1
-                    status['message'] = 'Invalid response at {:6f},{:6f}, abandoning location'.format(step_location[0], step_location[1])
+                    status['message'] = messages['invalid']
                     log.error(status['message'])
                     time.sleep(scheduler.delay(status['last_scan_date']))
                     continue
@@ -620,10 +622,11 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
 
         # catch any process exceptions, log them, and continue the thread
         except Exception as e:
-            status['message'] = 'Exception in search_worker using account {}. Restarting with fresh account. See logs for details.'.format(account['username'])
-            time.sleep(args.scan_delay)
             log.error('Exception in search_worker under account {} Exception message: {}'.format(account['username'], e))
+            status['message'] = 'Exception in search_worker using account {}. Restarting with fresh account. See logs for details.'.format(account['username'])
+            traceback.print_exc(file=sys.stdout)
             account_failures.append({'account': account, 'last_fail_time': now(), 'reason': 'exception'})
+            time.sleep(args.scan_delay)
 
 
 def check_login(args, account, api, position, proxy_url):
