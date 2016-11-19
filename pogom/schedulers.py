@@ -608,6 +608,9 @@ class SpeedScan(HexSearch):
             durations = {}
             tth_ranges = {}
             tth_found = 0
+            found_percent = 100
+            good_percent = 100
+            spawns_reached = 100
             spawnpoints = SpawnPoint.select_in_hex(self.scan_location, self.args.step_limit)
             for sp in spawnpoints:
                 tth_found += sp['earliest_unseen'] == sp['latest_seen']
@@ -635,8 +638,9 @@ class SpeedScan(HexSearch):
 
             sum = spawns_all + spawns_missed
             if sum:
+                spawns_reached = spawns_all * 100 / (spawns_all + spawns_missed)
                 log.info('%d Pokemon found, and %d were not reached in time for %.1f%% found',
-                         spawns_all, spawns_missed, spawns_all * 100 / (spawns_all + spawns_missed))
+                         spawns_all, spawns_missed, spawns_reached)
 
             if spawns_timed:
                 average = reduce(lambda x, y: x + y['done'], spawns_timed_list, 0) / spawns_timed
@@ -645,25 +649,25 @@ class SpeedScan(HexSearch):
 
                 spawns_missed = reduce(lambda x, y: x + len(y), self.spawns_missed_delay.values(), 0)
                 sum = spawns_missed + self.spawns_found
-                missing_percent = self.spawns_found * 100 / sum if sum else 0
+                found_percent = self.spawns_found * 100 / sum if sum else 0
                 log.info('%d spawns scanned and %d spawns were not there when expected for %d%%',
-                         self.spawns_found, spawns_missed, missing_percent)
-                self.spawn_percent.append(missing_percent)
+                         self.spawns_found, spawns_missed, found_percent)
+                self.spawn_percent.append(found_percent)
                 if self.spawns_missed_delay:
                     log.warning('Missed spawn IDs with times after spawn:')
                     log.warning(self.spawns_missed_delay)
                 log.info('History: %s', str(self.spawn_percent).strip('[]'))
 
             sum = self.scans_done + len(self.scans_missed_list)
-            bad_percent = self.scans_done * 100 / sum if sum else 0
+            good_percent = self.scans_done * 100 / sum if sum else 0
             log.info('%d scans successful and %d scans missed for %d%% found',
-                     self.scans_done, len(self.scans_missed_list), bad_percent)
-            self.scan_percent.append(bad_percent)
+                     self.scans_done, len(self.scans_missed_list), good_percent)
+            self.scan_percent.append(good_percent)
             if self.scans_missed_list:
                 log.warning('Missed scans: %s', Counter(self.scans_missed_list).most_common(3))
             log.info('History: %s', str(self.scan_percent).strip('[]'))
             self.status_message = 'Initial scan: {}%, TTH found: {}%, '.format(band_percent, tth_found * 100 / len(spawnpoints))
-            self.status_message += 'Spawns reached: {}%, Spawns found: {}%, Good scans {}%'.format(spawns_all * 100 / (spawns_all + spawns_missed), missing_percent, bad_percent)
+            self.status_message += 'Spawns reached: {}%, Spawns found: {}%, Good scans {}%'.format(spawns_reached, found_percent, good_percent)
             self._stat_init()
 
     # Find the best item to scan next

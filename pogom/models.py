@@ -892,7 +892,19 @@ class WorkerStatus(BaseModel):
                  .where((WorkerStatus.username == username))
                  .dicts())
 
-        return query[0] if len(query) else None
+        # Sometimes is appears peewee is slow to load, and and this produces an Exception
+        # Retry after a second to give peewee time to load
+        while True:
+            try:
+                result = query[0] if len(query) else None
+                break
+            except Exception as e:
+                log.error('Exception in get_worker under account {} Exception message: {}'.format(account['username'], e))
+                status['message'] = 'Exception in search_worker using account {}. Retrying.'.format(account['username'])
+                traceback.print_exc(file=sys.stdout)
+                time.sleep(1)
+
+        return result
 
 
 class SpawnPoint(BaseModel):
