@@ -605,7 +605,7 @@ class SpeedScan(HexSearch):
             spawns_all = spawns_timed + len(filter(lambda e: e['kind'] == 'spawn', Scanned_list))
             spawns_missed = len(filter(lambda e: e['kind'] == 'spawn', Missed_list))
             band_percent = self.band_status()
-            durations = {}
+            kinds = {}
             tth_ranges = {}
             tth_found = 0
             found_percent = 100
@@ -614,15 +614,15 @@ class SpeedScan(HexSearch):
             spawnpoints = SpawnPoint.select_in_hex(self.scan_location, self.args.step_limit)
             for sp in spawnpoints:
                 tth_found += sp['earliest_unseen'] == sp['latest_seen']
-                duration = str(sp['kind'].count('s') * 15)
-                durations[duration] = durations.get(duration, 0) + 1
+                kind = sp['kind']
+                kinds[kind] = kinds.get(kind, 0) + 1
                 tth_range = str(int(round(((sp['earliest_unseen'] - sp['latest_seen']) % 3600) / 60.0)))
                 tth_ranges[tth_range] = tth_ranges.get(tth_range, 0) + 1
             tth_ranges['0'] = tth_ranges.get('0', 0) - tth_found
 
             log.info('Total Spawn Points found in hex: %d', len(spawnpoints))
-            for k in sorted(durations.keys()):
-                log.info('%s minute spawns: %d or %d%%', k, durations[k], durations[k] * 100 / len(spawnpoints))
+            for k in sorted(kinds.keys()):
+                log.info('%s kind spawns: %d or %d%%', k, kinds[k], kinds[k] * 100 / len(spawnpoints))
             log.info('Spawns with found TTH: %d or %d%%', tth_found, tth_found * 100 / len(spawnpoints))
             for k in sorted(tth_ranges.keys(), key=int):
                 log.info('Spawnpoints with a %sm range to find TTH: %d', k, tth_ranges[k])

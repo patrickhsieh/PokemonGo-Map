@@ -858,6 +858,7 @@ class WorkerStatus(BaseModel):
 
     @staticmethod
     def db_format(status):
+        location = status.get('location', [0, 0])  # will be fixed to current loc in worker thread 
         return {'username': status['user'],
                 'worker_name': 'status_worker_db',
                 'success': status['success'],
@@ -866,9 +867,9 @@ class WorkerStatus(BaseModel):
                 'skip': status['skip'],
                 'last_modified': datetime.utcnow(),
                 'message': status['message'],
-                'last_scan_date': status['last_scan_date'],
-                'latitude': status['location'][0],
-                'longitude': status['location'][1]}
+                'last_scan_date': status.get('last_scan_date', datetime.utcnow()),
+                'latitude': location[0],
+                'longitude': location[1]}
 
     @staticmethod
     def get_recent():
@@ -899,8 +900,7 @@ class WorkerStatus(BaseModel):
                 result = query[0] if len(query) else None
                 break
             except Exception as e:
-                log.error('Exception in get_worker under account {} Exception message: {}'.format(account['username'], e))
-                status['message'] = 'Exception in search_worker using account {}. Retrying.'.format(account['username'])
+                log.error('Exception in get_worker under account {} Exception message: {}'.format(username, e))
                 traceback.print_exc(file=sys.stdout)
                 time.sleep(1)
 
@@ -963,11 +963,11 @@ class SpawnPoint(BaseModel):
 
         }
 
-    # Confirm if spawnpoint is fully identified
+    # Confirm if tth has been found
     @staticmethod
-    def identified(sp):
+    def tth_found(sp):
         # fully indentified if no '?' in links and latest seen == earliest seen
-        return not str(sp['links']).count('?') and sp['latest_seen'] == sp['earliest_unseen']
+        return sp['latest_seen'] == sp['earliest_unseen']
 
     # return [start, end] in seconds after the hour for the spawn, despawn time of a spawnpoint
     @staticmethod
@@ -983,7 +983,8 @@ class SpawnPoint(BaseModel):
         sp['links'] = sp['links'][:-1] + '-'
         plus_or_minus = links.index('+') if links.count('+') else links.index('-')
         start = sp['earliest_unseen'] - (4 - plus_or_minus) * 900
-        end = sp['latest_seen'] - (3 - links.index('-')) * 900 + (60 if sp['earliest_unseen'] != sp['latest_seen'] else 0)
+        no_tth_adjust = (60 if sp['earliest_unseen'] != sp['latest_seen'] else 0)
+        end = sp['latest_seen'] - (3 - links.index('-')) * 900 + no_tth_adjust 
         return [start % 3600, end % 3600]
 
     # return [start, end] in seconds after the hour for the hidden start, end times of a spawnpoint
@@ -1125,10 +1126,10 @@ class SpawnpointDetectionData(BaseModel):
     tth_secs = IntegerField(null=True)
 
     @classmethod
-    def classify(cls, sp, scan_loc, now_secs, sighting=None):
+    def classify(cls, sp, scan_loc, sighting=None):
 
         # return if already fully classified
-        if SpawnPoint.identified(sp) and scan_loc['done']:
+        if SpawnPoint.tth_found(sp) and scan_loc['done']:
             return
 
         # get past sightings
@@ -1162,7 +1163,7 @@ class SpawnpointDetectionData(BaseModel):
         # greater than 15 min, so it must be a double-spawn
         if len(gap_list) > 4 and sorted(gap_list)[-2] > 900:
             sp['kind'] = 'hshs'
-            sp['links'] = 'h+h-'  # assumption until clarified below
+            sp['links'] = 'h?h?'
 
         else:
             # convert the duration into a 'hhhs', 'hhss', 'hsss', 'ssss' string accordingly
@@ -1509,10 +1510,10 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                     log.warning('Redoing scan of this location to identify new spawnpoint.')
                     ScannedLocation.reset_bands(scan_location)
 
-            if not SpawnPoint.identified(sp) or sighting['tth_secs'] or not scan_location['done']:
+            if not SpawnPoint.tth_found(sp) or sighting['tth_secs'] or not scan_location['done']:
                 sightings[p['encounter_id']] = sighting
 
-            SpawnpointDetectionData.classify(sp, scan_location, now_secs, sighting)
+            SpawnpointDetectionData.classify(sp, scan_location, sighting)
 
             sp['last_scanned'] = datetime.utcfromtimestamp(p['last_modified_timestamp_ms'] / 1000.0)
 
@@ -1682,15 +1683,14 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
         # not seen and not a speed violation
         else:
             sp = SpawnPoint.get_by_id(sp_id)
-            if (len(nearby_pokemons) or len(wild_pokemon)):
-                if SpawnpointDetectionData.unseen(sp, now_secs):
-                    spawn_points[sp['id']] = sp
-                endpoints = SpawnPoint.start_end(sp)
-                if clock_between(endpoints[0], now_secs, endpoints[1]):
-                    sp['missed_count'] += 1
-                    spawn_points[sp['id']] = sp
-                    log.warning('%d minute spawnpoint %s has no pokemon %d times in a row',
-                                sp['kind'].count('s') * 15, sp['id'], sp['missed_count'])
+            if SpawnpointDetectionData.unseen(sp, now_secs):
+                spawn_points[sp['id']] = sp
+            endpoints = SpawnPoint.start_end(sp)
+            if clock_between(endpoints[0], now_secs, endpoints[1]):
+                sp['missed_count'] += 1
+                spawn_points[sp['id']] = sp
+                log.warning('%d minute spawnpoint %s has no pokemon %d times in a row',
+                            sp['kind'].count('s') * 15, sp['id'], sp['missed_count'])
 
         if (sp['latest_seen'] != sp['earliest_unseen'] and
                 (sp['latest_seen'] - sp['earliest_unseen']) % 3600 < 60):
