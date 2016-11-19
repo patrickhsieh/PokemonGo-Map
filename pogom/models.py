@@ -5,6 +5,7 @@ import logging
 import itertools
 import calendar
 import sys
+import traceback
 import gc
 import time
 import geopy
@@ -858,7 +859,7 @@ class WorkerStatus(BaseModel):
 
     @staticmethod
     def db_format(status):
-        location = status.get('location', [0, 0])  # will be fixed to current loc in worker thread 
+        location = status.get('location', [0, 0])  # will be fixed to current loc in worker thread
         return {'username': status['user'],
                 'worker_name': 'status_worker_db',
                 'success': status['success'],
@@ -984,7 +985,7 @@ class SpawnPoint(BaseModel):
         plus_or_minus = links.index('+') if links.count('+') else links.index('-')
         start = sp['earliest_unseen'] - (4 - plus_or_minus) * 900
         no_tth_adjust = (60 if sp['earliest_unseen'] != sp['latest_seen'] else 0)
-        end = sp['latest_seen'] - (3 - links.index('-')) * 900 + no_tth_adjust 
+        end = sp['latest_seen'] - (3 - links.index('-')) * 900 + no_tth_adjust
         return [start % 3600, end % 3600]
 
     # return [start, end] in seconds after the hour for the hidden start, end times of a spawnpoint
