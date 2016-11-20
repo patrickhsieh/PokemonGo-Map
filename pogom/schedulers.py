@@ -684,7 +684,7 @@ class SpeedScan(HexSearch):
         ms = (now_date - self.refresh_date).total_seconds() + self.refresh_ms
         best = {'score': 0}
         cant_reach = False
-        worker_loc = status['location']
+        worker_loc = [status['latitude'], status['longitude']]
         last_action = status['last_scan_date']
 
         # check all scan locations possible in the queue

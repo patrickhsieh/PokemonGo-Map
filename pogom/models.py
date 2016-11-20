@@ -854,12 +854,11 @@ class WorkerStatus(BaseModel):
     last_modified = DateTimeField(index=True)
     message = CharField(max_length=255)
     last_scan_date = DateTimeField(index=True)
-    latitude = DoubleField(default=0)
-    longitude = DoubleField(default=0)
+    latitude = DoubleField(null=True)
+    longitude = DoubleField(null=True)
 
     @staticmethod
     def db_format(status):
-        location = status.get('location', [0, 0])  # will be fixed to current loc in worker thread
         return {'username': status['user'],
                 'worker_name': 'status_worker_db',
                 'success': status['success'],
@@ -869,10 +868,11 @@ class WorkerStatus(BaseModel):
                 'last_modified': datetime.utcnow(),
                 'message': status['message'],
                 'last_scan_date': status.get('last_scan_date', datetime.utcnow()),
-                'latitude': location[0],
-                'longitude': location[1]}
+                'latitude': status.get('latitude', None),
+                'longitude': status.get('longitude', None)}
 
     @staticmethod
+
     def get_recent():
         query = (WorkerStatus
                  .select()
@@ -888,7 +888,7 @@ class WorkerStatus(BaseModel):
         return status
 
     @staticmethod
-    def get_worker(username):
+    def get_worker(username, loc=False):
         query = (WorkerStatus
                  .select()
                  .where((WorkerStatus.username == username))
@@ -898,7 +898,19 @@ class WorkerStatus(BaseModel):
         # Retry after a second to give peewee time to load
         while True:
             try:
-                result = query[0] if len(query) else None
+                result = query[0] if len(query) else {
+                    'username': username,
+                    'worker_name': 'status_worker_db',
+                    'success': 0,
+                    'fail': 0,
+                    'no_items': 0,
+                    'skip': 0,
+                    'last_modified': datetime.utcnow(),
+                    'message': 'New account {} loaded'.format(username),
+                    'last_scan_date': datetime.utcnow(),
+                    'latitude': loc[0] if loc else None,
+                    'longitude': loc[1] if loc else None
+                }
                 break
             except Exception as e:
                 log.error('Exception in get_worker under account {} Exception message: {}'.format(username, e))

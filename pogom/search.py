@@ -235,7 +235,7 @@ def worker_status_db_thread(threads_status, name, db_updates_queue):
                     'method': status['scheduler'],
                     'last_modified': datetime.utcnow()
                 }
-            if status['type'] == 'Worker':
+            elif status['type'] == 'Worker':
                 workers[status['user']] = WorkerStatus.db_format(status)
         if overseer is not None:
             db_updates_queue.put((MainWorker, {0: overseer}))
@@ -380,15 +380,14 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
             # Get account
             status['message'] = 'Waiting to get new account from the queue'
             log.info(status['message'])
-            account = account_queue.get()
-            status['message'] = 'Switching to account {}'.format(account['username'])
-            status['user'] = account['username']
-            previous_status = WorkerStatus.get_worker(status['user'])
-            log.info(status['message'])
-
             # Make sure the scheduler is done for valid locations
             while not scheduler.ready:
                 time.sleep(1)
+
+            account = account_queue.get()
+            status.update(WorkerStatus.get_worker(account['username'], scheduler.scan_location))
+            status['message'] = 'Switching to account {}'.format(account['username'])
+            log.info(status['message'])
 
             stagger_thread(args, account)
 
@@ -397,14 +396,6 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
             status['success'] = 0
             status['noitems'] = 0
             status['skip'] = 0
-            if previous_status:
-                status['last_scan_date'] = previous_status['last_scan_date']
-                status['location'] = (previous_status['latitude'], previous_status['longitude'], 0)
-
-            # if no previous record, assume at at the center of the scan
-            else:
-                status['last_scan_date'] = datetime.utcnow()
-                status['location'] = scheduler.scan_location
 
             # only sleep when consecutive_fails reaches max_failures, overall fails for stat purposes
             consecutive_fails = 0
@@ -531,7 +522,8 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
 
                 # Record the time and place the worker made the request at
                 status['last_scan_date'] = datetime.utcnow()
-                status['location'] = step_location
+                status['latitude'] = step_location[0]
+                status['longitude'] = step_location[1]
                 dbq.put((WorkerStatus, {0: WorkerStatus.db_format(status)}))
 
                 # G'damnit, nothing back. Mark it up, sleep, carry on
