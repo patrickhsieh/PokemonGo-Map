@@ -872,7 +872,6 @@ class WorkerStatus(BaseModel):
                 'longitude': status.get('longitude', None)}
 
     @staticmethod
-
     def get_recent():
         query = (WorkerStatus
                  .select()
