@@ -11,7 +11,7 @@ import time
 import geopy
 import math
 from operator import itemgetter
-from peewee import SqliteDatabase, InsertQuery, Check, \
+from peewee import SqliteDatabase, InsertQuery, Check, CompositeKey, \
     IntegerField, CharField, DoubleField, BooleanField, \
     DateTimeField, fn, DeleteQuery, FloatField, SQL, TextField
 from playhouse.flask_utils import FlaskDB
@@ -1126,8 +1126,11 @@ class ScanSpawnPoint(BaseModel):
     # scannedlocation = ForeignKeyField(ScannedLocation)
     # spawnpoint = ForeignKeyField(SpawnPoint)
 
-    scannedlocation = CharField(primary_key=True, max_length=54)
+    scannedlocation = CharField(max_length=54)
     spawnpoint = CharField(max_length=54)
+
+    class Meta:
+        primary_key = CompositeKey('spawnpoint', 'scannedlocation')
 
 
 class SpawnpointDetectionData(BaseModel):
@@ -1500,8 +1503,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
 
             # time_till_hidden_ms was overflowing causing a negative integer.
             # It was also returning a value above 3.6M ms.
-            valid_tth = 0 < p['time_till_hidden_ms'] < 3600000
-            if valid_tth:
+            if 0 < p['time_till_hidden_ms'] < 3600000:
                 d_t_secs = date_secs(datetime.utcfromtimestamp((p['last_modified_timestamp_ms'] + p['time_till_hidden_ms']) / 1000.0))
                 if sp['latest_seen'] != sp['earliest_unseen']:
                     log.info('TTH found for spawnpoint %s', sp['id'])
@@ -1509,11 +1511,11 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                 sp['latest_seen'] = d_t_secs
                 sp['earliest_unseen'] = d_t_secs
 
+            scan_spawn_points[scan_location['cellid'] + sp['id']] = {'spawnpoint': sp['id'],
+                                                                     'scannedlocation': scan_location['cellid']}
             if not sp['last_scanned']:
                 log.info('New Spawn Point found!')
                 new_spawn_points.append(sp)
-                scan_spawn_points[scan_location['cellid'] + sp['id']] = {'spawnpoint': sp['id'],
-                                                                         'scannedlocation': scan_location['cellid']}
 
                 # if we found a new spawnpoint after the location was already fully scanned
                 # either it's new, or we had a bad scan. Either way, rescan the loc
