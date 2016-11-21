@@ -154,7 +154,7 @@ def status_printer(threadStatus, search_items_queue, db_updates_queue, wh_queue,
             proxylen = 5
             for item in threadStatus:
                 if threadStatus[item]['type'] == 'Worker':
-                    userlen = max(userlen, len(threadStatus[item]['user']))
+                    userlen = max(userlen, len(threadStatus[item]['username']))
                     if 'proxy_display' in threadStatus[item]:
                         proxylen = max(proxylen, len(str(threadStatus[item]['proxy_display'])))
 
@@ -173,7 +173,7 @@ def status_printer(threadStatus, search_items_queue, db_updates_queue, wh_queue,
                     if current_line > end_line:
                         break
 
-                    status_text.append(status.format(item, time.strftime('%H:%M', time.localtime(threadStatus[item]['starttime'])), threadStatus[item]['user'], threadStatus[item]['proxy_display'], threadStatus[item]['success'], threadStatus[item]['fail'], threadStatus[item]['noitems'], threadStatus[item]['skip'], threadStatus[item]['message']))
+                    status_text.append(status.format(item, time.strftime('%H:%M', time.localtime(threadStatus[item]['starttime'])), threadStatus[item]['username'], threadStatus[item]['proxy_display'], threadStatus[item]['success'], threadStatus[item]['fail'], threadStatus[item]['noitems'], threadStatus[item]['skip'], threadStatus[item]['message']))
 
         elif display_type[0] == 'failedaccounts':
             status_text.append('-----------------------------------------')
@@ -236,7 +236,7 @@ def worker_status_db_thread(threads_status, name, db_updates_queue):
                     'last_modified': datetime.utcnow()
                 }
             elif status['type'] == 'Worker':
-                workers[status['user']] = WorkerStatus.db_format(status)
+                workers[status['username']] = WorkerStatus.db_format(status, name)
         if overseer is not None:
             db_updates_queue.put((MainWorker, {0: overseer}))
             db_updates_queue.put((WorkerStatus, workers))
@@ -317,7 +317,7 @@ def search_overseer_thread(args, new_location_queue, pause_bit, heartb, db_updat
             'fail': 0,
             'noitems': 0,
             'skip': 0,
-            'user': '',
+            'username': '',
             'proxy_display': proxy_display,
             'proxy_url': proxy_url
         }

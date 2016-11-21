@@ -846,7 +846,7 @@ class MainWorker(BaseModel):
 
 class WorkerStatus(BaseModel):
     username = CharField(primary_key=True, max_length=50)
-    worker_name = CharField()
+    worker_name = CharField(index=True, max_length=50)
     success = IntegerField()
     fail = IntegerField()
     no_items = IntegerField()
@@ -858,9 +858,10 @@ class WorkerStatus(BaseModel):
     longitude = DoubleField(null=True)
 
     @staticmethod
-    def db_format(status):
-        return {'username': status['user'],
-                'worker_name': 'status_worker_db',
+    def db_format(status, name='status_worker_db'):
+        status['worker_name'] = status.get('worker_name', name)
+        return {'username': status['username'],
+                'worker_name': status['worker_name'],
                 'success': status['success'],
                 'fail': status['fail'],
                 'no_items': status['noitems'],
@@ -899,7 +900,6 @@ class WorkerStatus(BaseModel):
             try:
                 result = query[0] if len(query) else {
                     'username': username,
-                    'worker_name': 'status_worker_db',
                     'success': 0,
                     'fail': 0,
                     'no_items': 0,
@@ -1703,12 +1703,12 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
             if clock_between(endpoints[0], now_secs, endpoints[1]):
                 sp['missed_count'] += 1
                 spawn_points[sp['id']] = sp
-                log.warning('%d minute spawnpoint %s has no pokemon %d times in a row',
-                            sp['kind'].count('s') * 15, sp['id'], sp['missed_count'])
+                log.warning('%s kind spawnpoint %s has no pokemon %d times in a row',
+                            sp['kind'], sp['id'], sp['missed_count'])
 
-        if (sp['latest_seen'] != sp['earliest_unseen'] and
+        if (sp['latest_seen'] != sp['earliest_unseen'] and scan_location['done'] and
                 (sp['latest_seen'] - sp['earliest_unseen']) % 3600 < 60):
-            log.warning('Spawnpoint %s was unable to locate a TTH, even with %s before end of spawn',
+            log.warning('Spawnpoint %s was unable to locate a TTH, even with %ss before end of spawn',
                         sp['id'], (sp['latest_seen'] - sp['earliest_unseen']) % 3600)
             log.info('Embiggening search for TTH by 15 minutes to try again')
             sp['latest_seen'] = (sp['latest_seen'] - 60) % 3600
