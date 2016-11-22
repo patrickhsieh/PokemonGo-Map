@@ -100,6 +100,7 @@ class Pokemon(BaseModel):
     @staticmethod
     def get_active(swLat, swLng, neLat, neLng, timestamp=0, oSwLat=None, oSwLng=None, oNeLat=None, oNeLng=None):
         now_date = datetime.utcnow()
+        # now_secs = date_secs(now_date)
         query = Pokemon.select()
         if not (swLat and swLng and neLat and neLng):
             query = (query
@@ -146,10 +147,9 @@ class Pokemon(BaseModel):
         pokemons = []
         for p in list(query):
 
-            # commenting out since it appears currently no hidden spawns times
+            # Disabled until confirmed double spawns exist
             # sp = SpawnPoint.get_by_id(p['spawnpoint_id'])
-            # hidden = SpawnPoint.hidden(sp)
-            # if hidden and clock_between(hidden[0], now_secs, hidden[1]):
+            # if SpawnPoint.hidden(sp, now_secs):
             #    continue
 
             p['pokemon_name'] = get_pokemon_name(p['pokemon_id'])
@@ -983,8 +983,8 @@ class SpawnPoint(BaseModel):
 
     # return [start, end] in seconds after the hour for the spawn, despawn time of a spawnpoint
     @staticmethod
-    def start_end(sp):
-        links = str(sp['links'])
+    def start_end(sp, links=False):
+        links = links if links else str(sp['links'])
 
         # make some assumptions if link not fully identified
         if links.count('-') == 0:
@@ -992,44 +992,27 @@ class SpawnPoint(BaseModel):
 
         links = links.replace('?', '+')
 
-        sp['links'] = sp['links'][:-1] + '-'
+        links = links[:-1] + '-'
         plus_or_minus = links.index('+') if links.count('+') else links.index('-')
         start = sp['earliest_unseen'] - (4 - plus_or_minus) * 900
-        no_tth_adjust = (60 if sp['earliest_unseen'] != sp['latest_seen'] else 0)
+        no_tth_adjust = 60 if not links and sp['earliest_unseen'] != sp['latest_seen'] else 0
         end = sp['latest_seen'] - (3 - links.index('-')) * 900 + no_tth_adjust
         return [start % 3600, end % 3600]
 
     # return [start, end] in seconds after the hour for the hidden start, end times of a spawnpoint
-    @staticmethod
-    def hidden(sp):
-        # waiting to test code until confirmation hidden's still exist
-        if True:
+    # currently only works for double spawnpoints, hshs
+    @classmethod
+    def hidden(self, sp, now_secs=False):
+        if sp['kind'] != 'hshs':
             return []
 
-        # unused code
         links = str(sp['links'])
-        links += links
-        i = 4 + links.index('-')
-        start = sp['latest_seen']
-        end = sp['earliest_unseen'] - 900
-        plus_after_hidden = False
-        hidden = 0
-        while True:
-            i -= 1
-            if links[i] == 'h':
-                if plus_after_hidden:
-                    break
-                hidden += 900
-            elif links[i] == '+':
-                start -= 900
-                end -= 900
-                if hidden:
-                    start -= hidden
-                    plus_after_hidden = True
-            else:
-                break
+        start_endpoints = self.start_end(sp, links.replace('-', 'h').replace('+', '-'))
+        end_endpoints = self.start_end(sp, links.replace('+', 'h'))
 
-        return [start % 3600, end % 3600] if hidden else []
+        return clock_between(start_endpoints[1], now_secs, end_endpoints[0]) \
+            if now_secs \
+            else [start_endpoints[1], end_endpoints[0]]
 
     # Return a list of dicts with the next spawn times
     @classmethod
@@ -1046,28 +1029,37 @@ class SpawnPoint(BaseModel):
             endpoints = SpawnPoint.start_end(sp)
             hidden = SpawnPoint.hidden(sp)
             if hidden:
-                cls.add_if_not_scanned_yet('spawn', l, sp, scan, endpoints[0], hidden[0], now_date, now_secs)
-                cls.add_if_not_scanned_yet('spawn', l, sp, scan, hidden[1], endpoints[1], now_date, now_secs)
+                cls.add_if_not_scanned('spawn', l, sp, scan, endpoints[0], hidden[0], now_date, now_secs)
+
+                # Don't scan after hidden period if already scanned before, unless we're still working on links
+                cls.add_if_not_scanned('spawn', l, sp, scan, hidden[1], endpoints[1], now_date, now_secs,
+                                       None if sp['links'].count('?') else endpoints[0])
             else:
-                cls.add_if_not_scanned_yet('spawn', l, sp, scan, endpoints[0], endpoints[1], now_date, now_secs)
+                cls.add_if_not_scanned('spawn', l, sp, scan, endpoints[0], endpoints[1], now_date, now_secs)
 
             # check to see if still searching for valid TTH
             if sp['latest_seen'] == sp['earliest_unseen']:
+                # confirm links
+                if False and sp['links'].count('?'):  # disabled until confirmed hidden time exist
+                    links = list('hhhh')
+                    links[sp['links'].index('?')] = '-'
+                    links = ''.join(links)
+                    endpoints = SpawnPoint.start_end(sp, links)
+                    cls.add_if_not_scanned('links', l, sp, scan, endpoints[0], endpoints[1], now_date, now_secs)
+
                 continue
 
             # add a spawnpoint check between latest seen and earliest seen
             end = sp['earliest_unseen']
             start = sp['latest_seen'] + scan_delay
 
-            # target mid point between start and end as point to scan
-            start = (start + int((end - start) % 3600 / 2)) % 3600
-
-            cls.add_if_not_scanned_yet('TTH', l, sp, scan, start, end, now_date, now_secs)
+            cls.add_if_not_scanned('TTH', l, sp, scan, start, end, now_date, now_secs)
 
         return l
 
     @classmethod
-    def add_if_not_scanned_yet(cls, kind, l, sp, scan, start, end, now_date, now_secs):
+    def add_if_not_scanned(cls, kind, l, sp, scan, start, end, now_date, now_secs, pre_hidden=None):
+        pre_hidden = pre_hidden if pre_hidden else start
 
         # make sure later than now_secs
         while end < now_secs:
@@ -1077,7 +1069,7 @@ class SpawnPoint(BaseModel):
         while start > end:
             start -= 3600
 
-        if (now_date - cls.get_by_id(sp['id'])['last_scanned']).total_seconds() > now_secs - start:
+        if (now_date - cls.get_by_id(sp['id'])['last_scanned']).total_seconds() > now_secs - pre_hidden:
             l.append(ScannedLocation._q_init(scan, start, end, kind, sp['id']))
 
     # given seconds after the hour and a spawnpoint dict, return which quartile of the
@@ -1144,7 +1136,7 @@ class SpawnpointDetectionData(BaseModel):
     def classify(cls, sp, scan_loc, sighting=None):
 
         # return if already fully classified
-        if SpawnPoint.tth_found(sp) and scan_loc['done']:
+        if SpawnPoint.tth_found(sp) and sp['links'].count('?') == 0:
             return
 
         # get past sightings
@@ -1524,7 +1516,8 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                     log.warning('Redoing scan of this location to identify new spawnpoint.')
                     ScannedLocation.reset_bands(scan_location)
 
-            if not SpawnPoint.tth_found(sp) or sighting['tth_secs'] or not scan_location['done']:
+            if (not SpawnPoint.tth_found(sp) or sighting['tth_secs'] or not scan_location['done'] or
+                    sp['links'].count('?')):
                 sightings[p['encounter_id']] = sighting
 
             SpawnpointDetectionData.classify(sp, scan_location, sighting)
@@ -1700,7 +1693,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
             if SpawnpointDetectionData.unseen(sp, now_secs):
                 spawn_points[sp['id']] = sp
             endpoints = SpawnPoint.start_end(sp)
-            if clock_between(endpoints[0], now_secs, endpoints[1]):
+            if (clock_between(endpoints[0], now_secs, endpoints[1]) and not SpawnPoint.hidden(sp, now_secs)):
                 sp['missed_count'] += 1
                 spawn_points[sp['id']] = sp
                 log.warning('%s kind spawnpoint %s has no pokemon %d times in a row',
@@ -1708,12 +1701,12 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
 
         if (sp['latest_seen'] != sp['earliest_unseen'] and scan_location['done'] and
                 (sp['latest_seen'] - sp['earliest_unseen']) % 3600 < 60):
-            log.warning('Spawnpoint %s was unable to locate a TTH, even with %ss before end of spawn',
+            log.warning('Spawnpoint %s was unable to locate a TTH, with only %ss after pokemon last seen',
                         sp['id'], (sp['latest_seen'] - sp['earliest_unseen']) % 3600)
             log.info('Embiggening search for TTH by 15 minutes to try again')
             sp['latest_seen'] = (sp['latest_seen'] - 60) % 3600
             sp['earliest_unseen'] = (sp['earliest_unseen'] + 14 * 60) % 3600
-            spawn_points[sp['id']] = sp
+            spawn_points[sp_id] = sp
 
     db_update_queue.put((ScannedLocation, {0: scan_location}))
 
