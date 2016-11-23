@@ -1166,7 +1166,7 @@ class SpawnpointDetectionData(BaseModel):
 
         # an hour (60 min) minus the largest gap in minutes gives us the duration the spawn was there
         # round up to the nearest 15 min interval for our current best duration guess
-        duration = (int((60 - max_gap / 60.0) / 15) + 1) * 15
+        duration = (int((59 - max_gap / 60.0) / 15) + 1) * 15
 
         # if the second largest gap is larger than 15 minutes, then there are two gaps that are
         # greater than 15 min, so it must be a double-spawn
@@ -1465,9 +1465,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
     if not len(nearby_pokemons) and not len(wild_pokemon):
         log.warning('Nothing on nearby_pokemons or wild. Speed violation?')
 
-    scan_location = ScannedLocation.get_by_loc(step_location)
-    fully_scanned = scan_location['done']
-    ScannedLocation.update_band(scan_location)
+    scan_loc = ScannedLocation.get_by_loc(step_location)
 
     if len(wild_pokemon):
         encounter_ids = [b64encode(str(p['encounter_id'])) for p in wild_pokemon]
@@ -1505,24 +1503,24 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                 sp['latest_seen'] = d_t_secs
                 sp['earliest_unseen'] = d_t_secs
 
-            scan_spawn_points[scan_location['cellid'] + sp['id']] = {'spawnpoint': sp['id'],
-                                                                     'scannedlocation': scan_location['cellid']}
+            scan_spawn_points[scan_loc['cellid'] + sp['id']] = {'spawnpoint': sp['id'],
+                                                                'scannedlocation': scan_loc['cellid']}
             if not sp['last_scanned']:
                 log.info('New Spawn Point found!')
                 new_spawn_points.append(sp)
 
                 # if we found a new spawnpoint after the location was already fully scanned
                 # either it's new, or we had a bad scan. Either way, rescan the loc
-                if fully_scanned:
+                if scan_loc['done']:
                     log.warning('Location was fully scanned, and yet a brand new spawnpoint found.')
                     log.warning('Redoing scan of this location to identify new spawnpoint.')
-                    ScannedLocation.reset_bands(scan_location)
+                    ScannedLocation.reset_bands(scan_loc)
 
-            if (not SpawnPoint.tth_found(sp) or sighting['tth_secs'] or not scan_location['done'] or
+            if (not SpawnPoint.tth_found(sp) or sighting['tth_secs'] or not scan_loc['done'] or
                     sp['links'].count('?')):
                 sightings[p['encounter_id']] = sighting
 
-            SpawnpointDetectionData.classify(sp, scan_location, sighting)
+            SpawnpointDetectionData.classify(sp, scan_loc, sighting)
 
             sp['last_scanned'] = datetime.utcfromtimestamp(p['last_modified_timestamp_ms'] / 1000.0)
 
@@ -1685,8 +1683,8 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
 
     log.debug('Skipped %d Pokemons and %d pokestops.', skipped, stopsskipped)
 
-    # look for spawnpoints within scan_location that are not here to see if can narrow down tth window
-    for sp_id in ScannedLocation.linked_spawn_points(scan_location['cellid']):
+    # look for spawnpoints within scan_loc that are not here to see if can narrow down tth window
+    for sp_id in ScannedLocation.linked_spawn_points(scan_loc['cellid']):
         if sp_id in sp_id_list:
             sp = spawn_points[sp_id]
         # not seen and not a speed violation
@@ -1701,7 +1699,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                 log.warning('%s kind spawnpoint %s has no pokemon %d times in a row',
                             sp['kind'], sp['id'], sp['missed_count'])
 
-        if (sp['latest_seen'] != sp['earliest_unseen'] and scan_location['done'] and
+        if (not SpawnPoint.tth_found(sp) and scan_loc['done'] and
                 (sp['latest_seen'] - sp['earliest_unseen']) % 3600 < 60):
             log.warning('Spawnpoint %s was unable to locate a TTH, with only %ss after pokemon last seen',
                         sp['id'], (sp['latest_seen'] - sp['earliest_unseen']) % 3600)
@@ -1710,7 +1708,9 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
             sp['earliest_unseen'] = (sp['earliest_unseen'] + 14 * 60) % 3600
             spawn_points[sp_id] = sp
 
-    db_update_queue.put((ScannedLocation, {0: scan_location}))
+    ScannedLocation.update_band(scan_loc)  # updating here so the last scan data isn't ignored by 'done'
+
+    db_update_queue.put((ScannedLocation, {0: scan_loc}))
 
     if len(pokemons):
         db_update_queue.put((Pokemon, pokemons))

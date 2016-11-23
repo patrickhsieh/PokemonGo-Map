@@ -358,8 +358,14 @@ def search_overseer_thread(args, new_location_queue, pause_bit, heartb, db_updat
         # If there are no search_items_queue either the loop has finished (or been
         # cleared above) -- either way, time to fill it back up
         if scheduler.time_to_refresh_queue():
+            threadStatus['Overseer']['message'] = 'Search queue empty, scheduling more items to scan'
             log.debug('Search queue empty, scheduling more items to scan')
-            scheduler.schedule()
+            try:  # Can't have the scheduler die because of a DB deadlock
+                scheduler.schedule()
+            except Exception as e:
+                log.error('Exception making schedule. Exception message: {}'.format(e))
+                traceback.print_exc(file=sys.stdout)
+                time.sleep(10)
         else:
             threadStatus['Overseer']['message'] = scheduler.get_overseer_message()
 
