@@ -982,8 +982,9 @@ class SpawnPoint(BaseModel):
         return sp['latest_seen'] == sp['earliest_unseen']
 
     # return [start, end] in seconds after the hour for the spawn, despawn time of a spawnpoint
-    @staticmethod
-    def start_end(sp, links=False):
+    @classmethod
+    def start_end(cls, sp, links=False):
+        links_arg = links
         links = links if links else str(sp['links'])
 
         # make some assumptions if link not fully identified
@@ -995,20 +996,20 @@ class SpawnPoint(BaseModel):
         links = links[:-1] + '-'
         plus_or_minus = links.index('+') if links.count('+') else links.index('-')
         start = sp['earliest_unseen'] - (4 - plus_or_minus) * 900
-        no_tth_adjust = 60 if not links and sp['earliest_unseen'] != sp['latest_seen'] else 0
+        no_tth_adjust = 60 if not links_arg and not cls.tth_found(sp) else 0
         end = sp['latest_seen'] - (3 - links.index('-')) * 900 + no_tth_adjust
         return [start % 3600, end % 3600]
 
     # return [start, end] in seconds after the hour for the hidden start, end times of a spawnpoint
     # currently only works for double spawnpoints, hshs
     @classmethod
-    def hidden(self, sp, now_secs=False):
+    def hidden(cls, sp, now_secs=False):
         if sp['kind'] != 'hshs':
             return []
 
         links = str(sp['links'])
-        start_endpoints = self.start_end(sp, links.replace('-', 'h').replace('+', '-'))
-        end_endpoints = self.start_end(sp, links.replace('+', 'h'))
+        start_endpoints = cls.start_end(sp, links.replace('-', 'h').replace('+', '-'))
+        end_endpoints = cls.start_end(sp, links.replace('+', 'h'))
 
         return clock_between(start_endpoints[1], now_secs, end_endpoints[0]) \
             if now_secs \
@@ -1038,7 +1039,7 @@ class SpawnPoint(BaseModel):
                 cls.add_if_not_scanned('spawn', l, sp, scan, endpoints[0], endpoints[1], now_date, now_secs)
 
             # check to see if still searching for valid TTH
-            if sp['latest_seen'] == sp['earliest_unseen']:
+            if cls.tth_found(sp):
                 # confirm links
                 if False and sp['links'].count('?'):  # disabled until confirmed hidden time exist
                     links = list('hhhh')
@@ -1136,7 +1137,8 @@ class SpawnpointDetectionData(BaseModel):
     def classify(cls, sp, scan_loc, sighting=None):
 
         # return if already fully classified
-        if SpawnPoint.tth_found(sp) and sp['links'].count('?') == 0:
+        # if SpawnPoint.tth_found(sp) and sp['links'].count('?') == 0:  # waiting for links necessary
+        if SpawnPoint.tth_found(sp) and scan_loc['done']:
             return
 
         # get past sightings
