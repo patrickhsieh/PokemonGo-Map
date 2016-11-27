@@ -62,7 +62,7 @@ class BaseScheduler(object):
         self.args = args
         self.scan_location = False
         self.size = None
-        self.ready = True
+        self.ready = False
 
     # Schedule function fills the queues with data.
     def schedule(self):
@@ -121,6 +121,7 @@ class BaseScheduler(object):
 
     # Function to empty all queues in the queues list
     def empty_queues(self):
+        self.ready = False
         for queue in self.queues:
             if not queue.empty():
                 try:
