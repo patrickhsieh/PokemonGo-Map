@@ -40,6 +40,7 @@ from pgoapi.exceptions import AuthException
 from .models import parse_map, GymDetails, parse_gyms, MainWorker, WorkerStatus
 from .fakePogoApi import FakePogoApi
 from .utils import now
+from .transform import get_new_coords
 import schedulers
 
 import terminalsize
@@ -91,7 +92,7 @@ def switch_status_printer(display_type, current_page):
 
 
 # Thread to print out the status of each worker.
-def status_printer(threadStatus, search_items_queue, db_updates_queue, wh_queue, account_queue, account_failures):
+def status_printer(threadStatus, search_items_queue_array, db_updates_queue, wh_queue, account_queue, account_failures):
     display_type = ["workers"]
     current_page = [1]
 
@@ -129,8 +130,12 @@ def status_printer(threadStatus, search_items_queue, db_updates_queue, wh_queue,
                     skip_total += threadStatus[item]['skip']
 
             # Print the queue length.
+            search_items_queue_size = 0
+            for i in range(0, len(search_items_queue_array)):
+                search_items_queue_size += search_items_queue_array[i].qsize()
+
             status_text.append('Queues: {} search items, {} db updates, {} webhook.  Total skipped items: {}. Spare accounts available: {}. Accounts on hold: {}'
-                               .format(search_items_queue.qsize(), db_updates_queue.qsize(), wh_queue.qsize(), skip_total, account_queue.qsize(), len(account_failures)))
+                               .format(search_items_queue_size, db_updates_queue.qsize(), wh_queue.qsize(), skip_total, account_queue.qsize(), len(account_failures)))
 
             # Print status of overseer.
             status_text.append('{} Overseer: {}'.format(threadStatus['Overseer']['scheduler'], threadStatus['Overseer']['message']))
@@ -220,7 +225,9 @@ def account_recycler(accounts_queue, account_failures, args):
                 account_failures.remove(a)
                 accounts_queue.put(a['account'])
             else:
-                log.info('Account {} needs to cool off for {} seconds due to {}'.format(a['account']['username'], a['last_fail_time'] - ok_time, a['reason']))
+                if 'notified' not in a:
+                    log.info('Account {} needs to cool off for {} minutes due to {}'.format(a['account']['username'], round((a['last_fail_time'] - ok_time) / 60, 0), a['reason']))
+                    a['notified'] = True
 
 
 def worker_status_db_thread(threads_status, name, db_updates_queue):
@@ -249,7 +256,8 @@ def search_overseer_thread(args, new_location_queue, pause_bit, heartb, db_updat
 
     log.info('Search overseer starting')
 
-    search_items_queue = Queue()
+    search_items_queue_array = []
+    scheduler_array = []
     account_queue = Queue()
     threadStatus = {}
 
@@ -275,7 +283,7 @@ def search_overseer_thread(args, new_location_queue, pause_bit, heartb, db_updat
         log.info('Starting status printer thread')
         t = Thread(target=status_printer,
                    name='status_printer',
-                   args=(threadStatus, search_items_queue, db_updates_queue, wh_queue, account_queue, account_failures))
+                   args=(threadStatus, search_items_queue_array, db_updates_queue, wh_queue, account_queue, account_failures))
         t.daemon = True
         t.start()
 
@@ -293,13 +301,18 @@ def search_overseer_thread(args, new_location_queue, pause_bit, heartb, db_updat
         t.daemon = True
         t.start()
 
-    # Create the appropriate type of scheduler to handle the search queue.
-    scheduler = schedulers.SchedulerFactory.get_scheduler(args.scheduler, [search_items_queue], threadStatus, args)
-
-    # Create specified number of search_worker_thread
+    # Create specified number of search_worker_thread.
     log.info('Starting search worker threads')
     for i in range(0, args.workers):
         log.debug('Starting search worker thread %d', i)
+
+        if args.beehive or i == 0:
+            search_items_queue = Queue()
+            # Create the appropriate type of scheduler to handle the search queue.
+            scheduler = schedulers.SchedulerFactory.get_scheduler(args.scheduler, [search_items_queue], threadStatus, args)
+
+            scheduler_array.append(scheduler)
+            search_items_queue_array.append(search_items_queue)
 
         # Set proxy for each worker, using round robin.
         proxy_display = 'No'
@@ -334,6 +347,7 @@ def search_overseer_thread(args, new_location_queue, pause_bit, heartb, db_updat
     # A place to track the current location.
     current_location = False
 
+    # The real work starts here but will halt on pause_bit.set().
     while True:
 
         if args.on_demand_timeout > 0 and (now() - args.on_demand_timeout) > heartb[0]:
@@ -342,7 +356,8 @@ def search_overseer_thread(args, new_location_queue, pause_bit, heartb, db_updat
 
         # Wait here while scanning is paused.
         while pause_bit.is_set():
-            scheduler.scanning_paused()
+            for i in range(0, len(scheduler_array)):
+                scheduler_array[i].scanning_paused()
             time.sleep(1)
 
         # If a new location has been passed to us, get the most recent one.
@@ -353,24 +368,93 @@ def search_overseer_thread(args, new_location_queue, pause_bit, heartb, db_updat
                     current_location = new_location_queue.get_nowait()
             except Empty:
                 pass
-            scheduler.location_changed(current_location, db_updates_queue)
+
+            step_distance = 0.9 if args.no_pokemon else 0.07
+
+            locations = generate_hive_locations(current_location, step_distance, args.step_limit, len(scheduler_array))
+
+            for i in range(0, len(scheduler_array)):
+                scheduler_array[i].location_changed(locations[i], db_updates_queue)
 
         # If there are no search_items_queue either the loop has finished (or been
         # cleared above) -- either way, time to fill it back up
-        if scheduler.time_to_refresh_queue():
-            threadStatus['Overseer']['message'] = 'Search queue empty, scheduling more items to scan'
-            log.debug('Search queue empty, scheduling more items to scan')
-            try:  # Can't have the scheduler die because of a DB deadlock
-                scheduler.schedule()
-            except Exception as e:
-                log.error('Exception making schedule. Exception message: {}'.format(e))
-                traceback.print_exc(file=sys.stdout)
-                time.sleep(10)
-        else:
-            threadStatus['Overseer']['message'] = scheduler.get_overseer_message()
+        for i in range(0, len(scheduler_array)):
+            if scheduler_array[i].time_to_refresh_queue():
+                threadStatus['Overseer']['message'] = 'Search queue {} empty, scheduling more items to scan'.format(i)
+                log.debug('Search queue %d empty, scheduling more items to scan', i)
+                try:  # Can't have the scheduler die because of a DB deadlock
+                    scheduler_array[i].schedule()
+                except Exception as e:
+                    log.error('Exception making schedule. Exception message: {}'.format(e))
+                    traceback.print_exc(file=sys.stdout)
+                    time.sleep(10)
+            else:
+                threadStatus['Overseer']['message'] = scheduler_array[i].get_overseer_message()
 
         # Now we just give a little pause here.
         time.sleep(1)
+
+
+# Generates the list of locations to scan
+def generate_hive_locations(current_location, step_distance, step_limit, worker_count):
+    NORTH = 0
+    EAST = 90
+    SOUTH = 180
+    WEST = 270
+
+    xdist = math.sqrt(3) * step_distance  # dist between column centers
+    ydist = 3 * (step_distance / 2)  # dist between row centers
+
+    results = []
+
+    results.append((current_location[0], current_location[1], 0))
+
+    loc = current_location
+    ring = 1
+
+    while len(results) < worker_count:
+
+        loc = get_new_coords(loc, ydist * (step_limit - 1), NORTH)
+        loc = get_new_coords(loc, xdist * (1.5 * step_limit - 0.5), EAST)
+        results.append((loc[0], loc[1], 0))
+
+        for i in range(ring):
+            loc = get_new_coords(loc, ydist * step_limit, NORTH)
+            loc = get_new_coords(loc, xdist * (1.5 * step_limit - 1), WEST)
+            results.append((loc[0], loc[1], 0))
+
+        for i in range(ring):
+            loc = get_new_coords(loc, ydist * (step_limit - 1), SOUTH)
+            loc = get_new_coords(loc, xdist * (1.5 * step_limit - 0.5), WEST)
+            results.append((loc[0], loc[1], 0))
+
+        for i in range(ring):
+            loc = get_new_coords(loc, ydist * (2 * step_limit - 1), SOUTH)
+            loc = get_new_coords(loc, xdist * 0.5, WEST)
+            results.append((loc[0], loc[1], 0))
+
+        for i in range(ring):
+            loc = get_new_coords(loc, ydist * (step_limit), SOUTH)
+            loc = get_new_coords(loc, xdist * (1.5 * step_limit - 1), EAST)
+            results.append((loc[0], loc[1], 0))
+
+        for i in range(ring):
+            loc = get_new_coords(loc, ydist * (step_limit - 1), NORTH)
+            loc = get_new_coords(loc, xdist * (1.5 * step_limit - 0.5), EAST)
+            results.append((loc[0], loc[1], 0))
+
+        # Back to start
+        for i in range(ring - 1):
+            loc = get_new_coords(loc, ydist * (2 * step_limit - 1), NORTH)
+            loc = get_new_coords(loc, xdist * 0.5, EAST)
+            results.append((loc[0], loc[1], 0))
+
+        loc = get_new_coords(loc, ydist * (2 * step_limit - 1), NORTH)
+        loc = get_new_coords(loc, xdist * 0.5, EAST)
+
+        ring += 1
+
+    return results
 
 
 def search_worker_thread(args, account_queue, account_failures, search_items_queue, pause_bit, status, dbq, whq, scheduler):
@@ -426,37 +510,6 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
                     log.warning(status['message'])
                     account_failures.append({'account': account, 'last_fail_time': now(), 'reason': 'failures'})
                     break  # Exit this loop to get a new account and have the API recreated.
-
-                if args.captcha_solving:
-
-                    if consecutive_empties >= 2:
-                        captcha_url = captcha_request(api)
-
-                        if len(captcha_url) > 1:
-                            status['message'] = 'Account {} is encountering a captcha, starting 2captcha sequence'.format(account['username'])
-                            log.warning(status['message'])
-                            captcha_token = token_request(args, status, captcha_url)
-
-                            if 'ERROR' in captcha_token:
-                                log.warning("Unable to resolve captcha, please check your 2captcha API key and/or wallet balance")
-                                account_failures.append({'account': account, 'last_fail_time': now(), 'reason': 'catpcha failed to verify'})
-                                break
-
-                            else:
-                                status['message'] = 'Retrieved captcha token, attempting to verify challenge for {}'.format(account['username'])
-                                log.info(status['message'])
-                                response = api.verify_challenge(token=captcha_token)
-
-                                if 'success' in response['responses']['VERIFY_CHALLENGE']:
-                                    status['message'] = "Account {} successfully uncaptcha'd".format(account['username'])
-                                    log.info(status['message'])
-
-                                else:
-                                    status['message'] = "Account {} failed verifyChallenge, putting away account for now".format(account['username'])
-                                    log.info(status['message'])
-                                    account_failures.append({'account': account, 'last_fail_time': now(), 'reason': 'catpcha failed to verify'})
-                                    break
-                                time.sleep(1)
 
                 while pause_bit.is_set():
                     status['message'] = 'Scanning paused'
@@ -539,8 +592,34 @@ def search_worker_thread(args, account_queue, account_failures, search_items_que
                     time.sleep(scheduler.delay(status['last_scan_date']))
                     continue
 
-                # Got the response, parse it out, send todo's to db/wh queues.
+                # Got the response, check for captcha, parse it out, then send todo's to db/wh queues.
                 try:
+                    # Captcha check
+                    if args.captcha_solving:
+                        captcha_url = response_dict['responses']['CHECK_CHALLENGE']['challenge_url']
+                        if len(captcha_url) > 1:
+                            status['message'] = 'Account {} is encountering a captcha, starting 2captcha sequence'.format(account['username'])
+                            log.warning(status['message'])
+                            captcha_token = token_request(args, status, captcha_url)
+                            if 'ERROR' in captcha_token:
+                                log.warning("Unable to resolve captcha, please check your 2captcha API key and/or wallet balance")
+                                account_failures.append({'account': account, 'last_fail_time': now(), 'reason': 'catpcha failed to verify'})
+                                break
+                            else:
+                                status['message'] = 'Retrieved captcha token, attempting to verify challenge for {}'.format(account['username'])
+                                log.info(status['message'])
+                                response = api.verify_challenge(token=captcha_token)
+                                if 'success' in response['responses']['VERIFY_CHALLENGE']:
+                                    status['message'] = "Account {} successfully uncaptcha'd".format(account['username'])
+                                    log.info(status['message'])
+                                    # Make another request for the same coordinate since the previous one was captcha'd
+                                    response_dict = map_request(api, step_location, args.jitter)
+                                else:
+                                    status['message'] = "Account {} failed verifyChallenge, putting away account for now".format(account['username'])
+                                    log.info(status['message'])
+                                    account_failures.append({'account': account, 'last_fail_time': now(), 'reason': 'catpcha failed to verify'})
+                                    break
+
                     parsed = parse_map(args, response_dict, step_location, dbq, whq, api)
                     scheduler.task_done(status, parsed)
                     if parsed['count'] > 0:
@@ -668,10 +747,20 @@ def map_request(api, position, jitter=False):
     try:
         cell_ids = util.get_cell_ids(scan_location[0], scan_location[1])
         timestamps = [0, ] * len(cell_ids)
-        return api.get_map_objects(latitude=f2i(scan_location[0]),
-                                   longitude=f2i(scan_location[1]),
-                                   since_timestamp_ms=timestamps,
-                                   cell_id=cell_ids)
+        req = api.create_request()
+        response = req.get_map_objects(latitude=f2i(scan_location[0]),
+                                       longitude=f2i(scan_location[1]),
+                                       since_timestamp_ms=timestamps,
+                                       cell_id=cell_ids)
+        response = req.check_challenge()
+        response = req.get_hatched_eggs()
+        response = req.get_inventory()
+        response = req.check_awarded_badges()
+        response = req.download_settings()
+        response = req.get_buddy_walked()
+        response = req.call()
+        return response
+
     except Exception as e:
         log.warning('Exception while downloading map: %s', e)
         return False
@@ -680,24 +769,25 @@ def map_request(api, position, jitter=False):
 def gym_request(api, position, gym):
     try:
         log.debug('Getting details for gym @ %f/%f (%fkm away)', gym['latitude'], gym['longitude'], calc_distance(position, [gym['latitude'], gym['longitude']]))
-        x = api.get_gym_details(gym_id=gym['gym_id'],
+        req = api.create_request()
+        x = req.get_gym_details(gym_id=gym['gym_id'],
                                 player_latitude=f2i(position[0]),
                                 player_longitude=f2i(position[1]),
                                 gym_latitude=gym['latitude'],
                                 gym_longitude=gym['longitude'])
-
+        x = req.check_challenge()
+        x = req.get_hatched_eggs()
+        x = req.get_inventory()
+        x = req.check_awarded_badges()
+        x = req.download_settings()
+        x = req.get_buddy_walked()
+        x = req.call()
         # Print pretty(x).
         return x
 
     except Exception as e:
         log.warning('Exception while downloading gym details: %s', e)
         return False
-
-
-def captcha_request(api):
-    response = api.check_challenge()
-    captcha_url = response['responses']['CHECK_CHALLENGE']['challenge_url']
-    return captcha_url
 
 
 def token_request(args, status, url):
@@ -737,11 +827,11 @@ def calc_distance(pos1, pos2):
     return d
 
 
-# Delay each thread start time so that logins only occur ~1s.
+# Delay each thread start time so that logins occur after delay.
 def stagger_thread(args, account):
     if args.accounts.index(account) == 0:
         return  # No need to delay the first one.
-    delay = args.accounts.index(account) + ((random.random() - .5) / 2)
+    delay = args.accounts.index(account) * args.login_delay + ((random.random() - .5) / 2)
     log.debug('Delaying thread startup for %.2f seconds', delay)
     time.sleep(delay)
 
