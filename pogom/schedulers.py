@@ -552,7 +552,8 @@ class SpeedScan(HexSearch):
     # Refresh queue every 5 minutes
     # the first band of a scan is done
     def time_to_refresh_queue(self):
-        return (datetime.utcnow() - self.refresh_date).total_seconds() > self.minutes * 60
+        return (datetime.utcnow() - self.refresh_date).total_seconds() > self.minutes * 60 or \
+            self.queues == [[]]
 
     # Function to empty all queues in the queues list
     def empty_queues(self):
