@@ -1134,11 +1134,11 @@ class SpawnpointDetectionData(BaseModel):
     tth_secs = IntegerField(null=True)
 
     @classmethod
-    def classify(cls, sp, scan_loc, sighting=None):
+    def classify(cls, sp, scan_loc, sighting=None, force=False):
 
-        # return if already fully classified
+        # if no new sighting
         # if SpawnPoint.tth_found(sp) and sp['links'].count('?') == 0:  # waiting for links necessary
-        if SpawnPoint.tth_found(sp) and scan_loc['done']:
+        if not sighting and not force:
             return
 
         # get past sightings
@@ -1516,8 +1516,9 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                     log.warning('Redoing scan of this location to identify new spawnpoint.')
                     ScannedLocation.reset_bands(scan_loc)
 
-            if (not SpawnPoint.tth_found(sp) or sighting['tth_secs'] or not scan_loc['done'] or
-                    sp['links'].count('?')):
+            # if (not SpawnPoint.tth_found(sp) or sighting['tth_secs'] or not scan_loc['done'] or
+            #         sp['links'].count('?')):   # removing since no apparent hidden times
+            if (not SpawnPoint.tth_found(sp) or sighting['tth_secs'] or not scan_loc['done']):
                 sightings[p['encounter_id']] = sighting
 
             SpawnpointDetectionData.classify(sp, scan_loc, sighting)
@@ -1703,9 +1704,11 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                             sp['kind'], sp['id'], sp['missed_count'])
 
         if (not SpawnPoint.tth_found(sp) and scan_loc['done'] and
-                (sp['latest_seen'] - sp['earliest_unseen']) % 3600 < 60):
+                (sp['earliest_unseen'] - sp['latest_seen']) % 3600 < 60):
             log.warning('Spawnpoint %s was unable to locate a TTH, with only %ss after pokemon last seen',
                         sp['id'], (sp['latest_seen'] - sp['earliest_unseen']) % 3600)
+            if sp_id not in sp_id_list:
+                SpawnpointDetectionData.classify(sp, scan_loc, force=True)
             log.info('Embiggening search for TTH by 15 minutes to try again')
             sp['latest_seen'] = (sp['latest_seen'] - 60) % 3600
             sp['earliest_unseen'] = (sp['earliest_unseen'] + 14 * 60) % 3600
