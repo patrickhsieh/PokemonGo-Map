@@ -439,14 +439,16 @@ class SpeedScan(HexSearch):
         self.locations = self._generate_locations()
         scans = {}
         initial = {}
-        scan_locs = ScannedLocation.select_in_hex(self.scan_location, self.args.step_limit)
+        all_scans = {}
+        for sl in ScannedLocation.select_in_hex(self.scan_location, self.args.step_limit):
+            all_scans[cellid((sl['latitude'], sl['longitude']))] = sl
+
         for i, e in enumerate(self.locations):
             cell = cellid(e[1])
             scans[cell] = {'loc': e[1],  # Lat/long pair
                            'step': e[0]}
 
-            scan_loc = filter(lambda x: x['latitude'] == e[1][0] and x['longitude'] == e[1][1], scan_locs)
-            initial[cell] = scan_loc[0] if scan_loc else ScannedLocation.new_loc(e[1])
+            initial[cell] = all_scans[cell] if cell in all_scans.keys() else ScannedLocation.new_loc(e[1])
 
         self.scans = scans
         db_update_queue.put((ScannedLocation, initial))
