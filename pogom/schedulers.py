@@ -634,13 +634,13 @@ class SpeedScan(HexSearch):
                 tth_range = str(int(round(((sp['earliest_unseen'] - sp['latest_seen']) % 3600) / 60.0)))
                 tth_ranges[tth_range] = tth_ranges.get(tth_range, 0) + 1
             tth_ranges['0'] = tth_ranges.get('0', 0) - tth_found
-            links_percent = links_ok * 100.0 / len(spawnpoints)
-
+            len_spawnpoints = len(spawnpoints) + (not len(spawnpoints))
+            links_percent = links_ok * 100.0 / len_spawnpoints
             log.info('Total Spawn Points found in hex: %d', len(spawnpoints))
             log.info('Inactive Spawn Points found in hex: %d or %.1f%%',
-                     len(spawnpoints) - active_sp, (len(spawnpoints) - active_sp) * 100.0 / len(spawnpoints))
+                     len(spawnpoints) - active_sp, (len(spawnpoints) - active_sp) * 100.0 / len_spawnpoints)
             log.info('Active Spawn Points found in hex: %d or %.1f%%',
-                     active_sp, active_sp * 100.0 / len(spawnpoints))
+                     active_sp, active_sp * 100.0 / len_spawnpoints)
             for k in sorted(kinds.keys()):
                 log.info('%s kind spawns: %d or %.1f%%', k, kinds[k], kinds[k] * 100.0 / active_sp)
             log.info('Spawns with found TTH: %d or %.1f%%', tth_found, tth_found * 100.0 / active_sp)
