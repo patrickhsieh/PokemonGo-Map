@@ -1016,7 +1016,7 @@ class SpawnPoint(BaseModel):
 
     # return [start, end] in seconds after the hour for the spawn, despawn time of a spawnpoint
     @classmethod
-    def start_end(cls, sp, links=False):
+    def start_end(cls, sp, spawn_delay=0, links=False):
         links_arg = links
         links = links if links else str(sp['links'])
 
@@ -1028,7 +1028,7 @@ class SpawnPoint(BaseModel):
 
         links = links[:-1] + '-'
         plus_or_minus = links.index('+') if links.count('+') else links.index('-')
-        start = sp['earliest_unseen'] - (4 - plus_or_minus) * 900
+        start = sp['earliest_unseen'] - (4 - plus_or_minus) * 900 + spawn_delay
         no_tth_adjust = 60 if not links_arg and not cls.tth_found(sp) else 0
         end = sp['latest_seen'] - (3 - links.index('-')) * 900 + no_tth_adjust
         return [start % 3600, end % 3600]
@@ -1045,7 +1045,7 @@ class SpawnPoint(BaseModel):
             if sp['missed_count'] > 5:
                 continue
 
-            endpoints = SpawnPoint.start_end(sp)
+            endpoints = SpawnPoint.start_end(sp, scan_delay)
             cls.add_if_not_scanned('spawn', l, sp, scan, endpoints[0], endpoints[1], now_date, now_secs)
 
             # check to see if still searching for valid TTH
@@ -1053,8 +1053,8 @@ class SpawnPoint(BaseModel):
                 continue
 
             # add a spawnpoint check between latest seen and earliest seen
-            end = sp['earliest_unseen']
             start = sp['latest_seen'] + scan_delay
+            end = sp['earliest_unseen']
 
             cls.add_if_not_scanned('TTH', l, sp, scan, start, end, now_date, now_secs)
 
@@ -1414,6 +1414,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
 
             sp = SpawnPoint.get_by_id(p['spawn_point_id'], p['latitude'], p['longitude'])
             spawn_points[p['spawn_point_id']] = sp
+            sp['missed_count'] = 0
 
             sighting = {
                 'id': b64encode(str(p['encounter_id'])) + '_' + str(now_secs),
@@ -1625,7 +1626,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
             sp = SpawnPoint.get_by_id(sp_id)
             if SpawnpointDetectionData.unseen(sp, now_secs):
                 spawn_points[sp['id']] = sp
-            endpoints = SpawnPoint.start_end(sp)
+            endpoints = SpawnPoint.start_end(sp, args.spawn_delay)
             if clock_between(endpoints[0], now_secs, endpoints[1]):
                 sp['missed_count'] += 1
                 spawn_points[sp['id']] = sp

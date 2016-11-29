@@ -418,7 +418,6 @@ class SpeedScan(HexSearch):
         self.scans_done = 0
         self.scans_missed = 0
         self.scans_missed_list = []
-        self.spawn_delay = 10  # number of seconds to delay after spawn time before scanning
         self.minutes = 5  # Minutes between scan updates. Should be less than 10 to allow for new bands
         self.found_percent = []
         self.scan_percent = []
@@ -595,7 +594,7 @@ class SpeedScan(HexSearch):
 
         for cell, scan in self.scans.iteritems():
             queue += ScannedLocation.get_times(scan, now_date)
-            queue += SpawnPoint.get_times(cell, scan, now_date, self.spawn_delay)
+            queue += SpawnPoint.get_times(cell, scan, now_date, self.args.spawn_delay)
 
         queue.sort(key=itemgetter('start'))
         self.queues[0] = queue
@@ -795,7 +794,7 @@ class SpeedScan(HexSearch):
             now_secs = date_secs(datetime.utcnow())
             item = self.queues[0][status['index_of_queue_item']]
             seconds_within_band = int((datetime.utcnow() - self.refresh_date).total_seconds()) + self.refresh_ms
-            start_delay = seconds_within_band - item['start'] - (self.spawn_delay if item['kind'] == 'spawn' else 0)
+            start_delay = seconds_within_band - item['start'] - (self.args.spawn_delay if item['kind'] == 'spawn' else 0)
             safety_buffer = item['end'] - seconds_within_band
 
             if safety_buffer < 0:
