@@ -1634,7 +1634,7 @@ def parse_map(args, map_dict, step_location, db_update_queue, wh_update_queue, a
                             sp['kind'], sp['id'], sp['missed_count'])
 
         if (not SpawnPoint.tth_found(sp) and scan_loc['done'] and
-                (sp['earliest_unseen'] - sp['latest_seen']) % 3600 < 60):
+                (sp['earliest_unseen'] - sp['latest_seen'] - args.spawn_delay) % 3600 < 60):
             log.warning('Spawnpoint %s was unable to locate a TTH, with only %ss after pokemon last seen',
                         sp['id'], (sp['earliest_unseen'] - sp['latest_seen']) % 3600)
             log.info('Embiggening search for TTH by 15 minutes to try again')
